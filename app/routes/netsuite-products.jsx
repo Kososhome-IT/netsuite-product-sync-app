@@ -46,11 +46,11 @@ return (
         <thead className="bg-gray-200">
           <tr>
             <th className="border border-gray-300 px-4 py-2 text-left">Sr No</th>
-            <th className="border border-gray-300 px-4 py-2 text-left">🆔 ID</th>
-            <th className="border border-gray-300 px-4 py-2 text-left">🆔 SKU/Item Number</th>
-            <th className="border border-gray-300 px-4 py-2 text-left">📦 Name</th>
-            <th className="border border-gray-300 px-4 py-2 text-left">🔖 UPC</th>
-            <th className="border border-gray-300 px-4 py-2 text-left">📝 Website Description</th>
+            <th className="border border-gray-300 px-4 py-2 text-left">ID</th>
+            <th className="border border-gray-300 px-4 py-2 text-left">SKU/Item Number</th>
+            <th className="border border-gray-300 px-4 py-2 text-left">Name</th>
+            <th className="border border-gray-300 px-4 py-2 text-left">UPC</th>
+            <th className="border border-gray-300 px-4 py-2 text-left">Website Description</th>
           </tr>
         </thead>
         <tbody>
