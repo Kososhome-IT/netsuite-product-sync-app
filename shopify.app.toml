@@ -1,32 +1,32 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "2d742ace81ae8423a85e994ab0d31e39"
-name = "Ch-product"
+name = "Product Sync Netsuite"
 handle = "ch-product"
-application_url = "https://usgs-origin-big-liechtenstein.trycloudflare.com"
+application_url = "https://const-dancing-inch-warm.trycloudflare.com"
 embedded = true
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true
+include_config_on_deploy = true
 
 [webhooks]
 api_version = "2025-07"
 
   [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "write_products"
 
 [auth]
-redirect_urls = ["https://usgs-origin-big-liechtenstein.trycloudflare.com/auth/callback", "https://usgs-origin-big-liechtenstein.trycloudflare.com/auth/shopify/callback", "https://usgs-origin-big-liechtenstein.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://const-dancing-inch-warm.trycloudflare.com/auth/callback", "https://const-dancing-inch-warm.trycloudflare.com/auth/shopify/callback", "https://const-dancing-inch-warm.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

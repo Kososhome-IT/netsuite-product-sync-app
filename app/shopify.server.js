@@ -33,3 +33,11 @@ export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
 export const sessionStorage = shopify.sessionStorage;
+export function adminClient() {
+  return shopify.api.admin.createClient({
+    storeDomain: process.env.SHOPIFY_STORE_DOMAIN, // e.g., dummy-ranjit.myshopify.com
+    accessToken: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN, // from your .env
+    apiVersion: ApiVersion.January25,
+  });
+}
+

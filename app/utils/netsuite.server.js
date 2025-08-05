@@ -21,12 +21,11 @@ function getOAuth() {
   });
 }
 
-async function fetchWithOAuth(url, method = 'GET') {
+async function fetchWithOAuth(url, method = 'GET', body = null) {
   const oauth = getOAuth();
   const REALM = process.env.NETSUITE_REALM;
 
   const request_data = { url, method };
-
   const token = {
     key: process.env.NETSUITE_TOKEN_ID,
     secret: process.env.NETSUITE_TOKEN_SECRET,
@@ -38,11 +37,17 @@ async function fetchWithOAuth(url, method = 'GET') {
   const headers = {
     ...oauthHeader,
     'Content-Type': 'application/json',
+    'Prefer': 'transient',
   };
 
   console.log(`🔹 Fetching: ${url}`);
 
-  const response = await fetch(url, { method, headers });
+  const response = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
   const data = await response.json();
 
   if (!response.ok) {
@@ -64,6 +69,7 @@ export async function fetchNetSuiteInventoryItemsWithDetails() {
 
     const detailedItems = [];
 
+    // STEP 2: Fetch details for each item
     for (const item of items) {
       const detailUrl = `${baseUrl}/${item.id}`;
       const detailData = await fetchWithOAuth(detailUrl);
