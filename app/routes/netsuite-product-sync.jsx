@@ -16,103 +16,132 @@ export const action = async ({ request }) => {
 
     let productId = null;
 
-    // 🔍 Step 1: Try to find existing variant by SKU
+    // 🔍 Check if variant with SKU exists
     if (sku) {
-      const query = `
+      const searchQuery = `
         query {
           productVariants(first: 1, query: "sku:${sku}") {
             edges {
               node {
                 id
-                sku
                 product {
                   id
-                  title
                 }
               }
             }
           }
         }
       `;
-
-      const searchRes = await admin.graphql(query);
+      const searchRes = await admin.graphql(searchQuery);
       const searchJson = await searchRes.json();
       const variantEdge = searchJson?.data?.productVariants?.edges?.[0];
-
       if (variantEdge) {
         productId = variantEdge.node.product.id;
       }
     }
 
-    // ✅ Step 2: If productId found → Update
+    // ✅ Update product if exists
     if (productId) {
       const updateMutation = `
         mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
-            product {
-              id
-              title
-              descriptionHtml
-            }
-            userErrors {
-              field
-              message
-            }
+            product { id title descriptionHtml }
+            userErrors { field message }
           }
         }
       `;
-
-      const updatePayload = {
-        input: {
-          id: productId,
-          title,
-          descriptionHtml: descriptionHtml || "",
-        },
-      };
-
-      const updateRes = await admin.graphql(updateMutation, {
-        variables: updatePayload,
+      await admin.graphql(updateMutation, {
+        variables: {
+          input: {
+            id: productId,
+            title,
+            descriptionHtml: descriptionHtml || ""
+          }
+        }
       });
 
-      const updateJson = await updateRes.json();
-      return json({ action: "updated", result: updateJson });
+      return json({ action: "updated", productId });
     }
 
-    // ✅ Step 3: Create new product (Shopify will auto-create default variant)
+    // ✅ Create new product
     const createMutation = `
       mutation productCreate($input: ProductInput!) {
         productCreate(input: $input) {
           product {
             id
-            title
-            descriptionHtml
+            variants(first: 1) {
+              edges { node { id } }
+            }
           }
-          userErrors {
-            field
-            message
-          }
+          userErrors { field message }
         }
       }
     `;
-
-    const createPayload = {
-      input: {
-        title,
-        descriptionHtml: descriptionHtml || "",
-      },
-    };
-
     const createRes = await admin.graphql(createMutation, {
-      variables: createPayload,
+      variables: {
+        input: {
+          title,
+          descriptionHtml: descriptionHtml || ""
+        }
+      }
     });
-
     const createJson = await createRes.json();
-    return json({ action: "created", result: createJson });
+    const product = await createJson?.data?.productCreate?.product;
+    const variantId = await product?.variants?.edges?.[0]?.node?.id;
+console.log("creation response : " ,variantId)
+    if (!product?.id || !variantId) {
+      return json({ error: `${createRes} : "Created product, but missing variant"` }, { status: 500 });
+    }
+
+    // ✅ Update SKU using productVariantsBulkUpdate
+    if (sku) {
+      const bulkUpdate = `
+        mutation productVariantsBulkUpdate(
+          $productId: ID!
+          $variants: [ProductVariantsBulkInput!]!
+        ) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            product { id }
+            productVariants { id sku }
+            userErrors { field message }
+          }
+        }
+      `;
+
+      const variantRes = await admin.graphql(bulkUpdate, {
+        variables: {
+          productId: product.id,
+          variants: [
+            {
+              id: variantId,
+              inventoryItem: { sku }
+            }
+          ]
+        }
+      });
+      const variantJson = await variantRes.json();
+
+      if (variantJson?.data?.productVariantsBulkUpdate?.userErrors?.length) {
+        return json({
+          error: "Variant bulk update failed",
+          details: variantJson.data.productVariantsBulkUpdate.userErrors
+        }, { status: 500 });
+      }
+
+      return json({
+        action: "created",
+        productId: product.id,
+        variantUpdated: true
+      });
+    }
+
+    return json({
+      action: "created",
+      productId: product.id,
+      variantUpdated: false
+    });
   } catch (error) {
     console.error("❌ Shopify Sync Error:", error);
-    return json(
-      { error: "Failed to sync with Shopify", details: error.message },
-      { status: 500 }
-    );
+    return json({ error: "Failed to sync", details: error.message }, { status: 500 });
   }
 };

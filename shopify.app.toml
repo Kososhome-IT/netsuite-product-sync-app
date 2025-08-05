@@ -3,7 +3,7 @@
 client_id = "2d742ace81ae8423a85e994ab0d31e39"
 name = "Product Sync Netsuite"
 handle = "ch-product"
-application_url = "https://const-dancing-inch-warm.trycloudflare.com"
+application_url = "https://affected-billing-hottest-consumer.trycloudflare.com"
 embedded = true
 
 [build]
@@ -26,7 +26,7 @@ api_version = "2025-07"
 scopes = "write_products"
 
 [auth]
-redirect_urls = ["https://const-dancing-inch-warm.trycloudflare.com/auth/callback", "https://const-dancing-inch-warm.trycloudflare.com/auth/shopify/callback", "https://const-dancing-inch-warm.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://affected-billing-hottest-consumer.trycloudflare.com/auth/callback", "https://affected-billing-hottest-consumer.trycloudflare.com/auth/shopify/callback", "https://affected-billing-hottest-consumer.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

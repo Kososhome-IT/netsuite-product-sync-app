@@ -51,8 +51,8 @@ async function fetchWithOAuth(url, method = 'GET', body = null) {
   const data = await response.json();
 
   if (!response.ok) {
-    console.error(`❌ Netsuite Error: ${response.status} ${response.statusText}`, data);
-    throw new Error(`❌ Netsuite Error: ${response.status} ${response.statusText}`);
+    console.error(`Netsuite Error: ${response.status} ${response.statusText}`, data);
+    throw new Error(`Netsuite Error: ${response.status} ${response.statusText}`);
   }
 
   return data;
@@ -79,7 +79,7 @@ export async function fetchNetSuiteInventoryItemsWithDetails() {
     console.log('✅ Detailed Inventory Items fetched from NetSuite:', JSON.stringify(detailedItems, null, 2));
     return detailedItems;
   } catch (error) {
-    console.error('❌ Netsuite Fetch Error:', error);
+    console.error('Netsuite Fetch Error:', error);
     throw error;
   }
 }
