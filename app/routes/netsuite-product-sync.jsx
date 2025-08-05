@@ -8,7 +8,7 @@ export const action = async ({ request }) => {
   try {
     const { admin } = await unauthenticated.admin(storeDomain);
     const payload = await request.json();
-    const { sku, title, descriptionHtml } = payload;
+    const { sku, title, descriptionHtml, metafields = [] } = payload;
 
     if (!title) {
       return json({ error: "Title is required." }, { status: 400 });
@@ -60,6 +60,11 @@ export const action = async ({ request }) => {
         }
       });
 
+      // ✅ Update metafields
+      if (metafields.length > 0) {
+        await updateMetafields(admin, productId, metafields);
+      }
+
       return json({ action: "updated", productId });
     }
 
@@ -86,20 +91,18 @@ export const action = async ({ request }) => {
       }
     });
     const createJson = await createRes.json();
-    const product = await createJson?.data?.productCreate?.product;
-    const variantId = await product?.variants?.edges?.[0]?.node?.id;
-console.log("creation response : " ,variantId)
-    if (!product?.id || !variantId) {
-      return json({ error: `${createRes} : "Created product, but missing variant"` }, { status: 500 });
+    const product = createJson?.data?.productCreate?.product;
+    const productIdNew = product?.id;
+    const variantId = product?.variants?.edges?.[0]?.node?.id;
+
+    if (!productIdNew || !variantId) {
+      return json({ error: "Created product, but missing variant" }, { status: 500 });
     }
 
     // ✅ Update SKU using productVariantsBulkUpdate
     if (sku) {
       const bulkUpdate = `
-        mutation productVariantsBulkUpdate(
-          $productId: ID!
-          $variants: [ProductVariantsBulkInput!]!
-        ) {
+        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
           productVariantsBulkUpdate(productId: $productId, variants: $variants) {
             product { id }
             productVariants { id sku }
@@ -110,7 +113,7 @@ console.log("creation response : " ,variantId)
 
       const variantRes = await admin.graphql(bulkUpdate, {
         variables: {
-          productId: product.id,
+          productId: productIdNew,
           variants: [
             {
               id: variantId,
@@ -127,21 +130,62 @@ console.log("creation response : " ,variantId)
           details: variantJson.data.productVariantsBulkUpdate.userErrors
         }, { status: 500 });
       }
+    }
 
-      return json({
-        action: "created",
-        productId: product.id,
-        variantUpdated: true
-      });
+    // ✅ Update metafields
+    if (metafields.length > 0) {
+      await updateMetafields(admin, productIdNew, metafields);
     }
 
     return json({
       action: "created",
-      productId: product.id,
-      variantUpdated: false
+      productId: productIdNew,
+      variantUpdated: !!sku
     });
+
   } catch (error) {
     console.error("❌ Shopify Sync Error:", error);
     return json({ error: "Failed to sync", details: error.message }, { status: 500 });
   }
 };
+
+
+// ✅ Reusable metafield update function
+async function updateMetafields(admin, productId, metafields) {
+  const mutation = `
+    mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields {
+          id
+          namespace
+          key
+          value
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const inputs = metafields.map((field) => ({
+    ownerId: productId,
+    namespace: field.namespace || "custom",
+    key: field.key,
+    type: field.type, // e.g., "single_line_text_field"
+    value: field.value
+  }));
+
+  const res = await admin.graphql(mutation, {
+    variables: {
+      metafields: inputs
+    }
+  });
+
+  const resJson = await res.json();
+  const errors = resJson?.data?.metafieldsSet?.userErrors;
+  if (errors?.length) {
+    console.warn("⚠️ Metafield errors:", errors);
+  }
+}
