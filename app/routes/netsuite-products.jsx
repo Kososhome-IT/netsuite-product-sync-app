@@ -1,6 +1,6 @@
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { fetchNetSuiteInventoryItemsWithDetails } from "../utils/netsuite.server";
+import { fetchNetSuiteInventoryItemsWithDetails } from "../netsuite-intigration/netsuite.server";
 
 // Loader to fetch customers from NetSuite
 export const loader = async () => {
