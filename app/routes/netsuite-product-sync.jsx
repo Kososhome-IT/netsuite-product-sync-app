@@ -8,13 +8,14 @@ export const action = async ({ request }) => {
   try {
     const { admin } = await unauthenticated.admin(storeDomain);
     const payload = await request.json();
-    const { sku, title, descriptionHtml, metafields = [] } = payload;
+    const { sku, title, descriptionHtml, metafields = [], variantMetafields = [] } = payload;
 
     if (!title) {
       return json({ error: "Title is required." }, { status: 400 });
     }
 
     let productId = null;
+    let variantId = null;
 
     // 🔍 Check if variant with SKU exists
     if (sku) {
@@ -37,11 +38,12 @@ export const action = async ({ request }) => {
       const variantEdge = searchJson?.data?.productVariants?.edges?.[0];
       if (variantEdge) {
         productId = variantEdge.node.product.id;
+        variantId = variantEdge.node.id;
       }
     }
 
     // ✅ Update product if exists
-    if (productId) {
+    if (productId && variantId) {
       const updateMutation = `
         mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
@@ -60,12 +62,17 @@ export const action = async ({ request }) => {
         }
       });
 
-      // ✅ Update metafields
+      // ✅ Update product metafields
       if (metafields.length > 0) {
         await updateMetafields(admin, productId, metafields);
       }
 
-      return json({ action: "updated", productId });
+      // ✅ Update variant metafields
+      if (variantMetafields.length > 0) {
+        await updateMetafields(admin, variantId, variantMetafields);
+      }
+
+      return json({ action: "updated", productId, variantId });
     }
 
     // ✅ Create new product
@@ -93,9 +100,9 @@ export const action = async ({ request }) => {
     const createJson = await createRes.json();
     const product = createJson?.data?.productCreate?.product;
     const productIdNew = product?.id;
-    const variantId = product?.variants?.edges?.[0]?.node?.id;
+    const variantIdNew = product?.variants?.edges?.[0]?.node?.id;
 
-    if (!productIdNew || !variantId) {
+    if (!productIdNew || !variantIdNew) {
       return json({ error: "Created product, but missing variant" }, { status: 500 });
     }
 
@@ -116,14 +123,14 @@ export const action = async ({ request }) => {
           productId: productIdNew,
           variants: [
             {
-              id: variantId,
+              id: variantIdNew,
               inventoryItem: { sku }
             }
           ]
         }
       });
-      const variantJson = await variantRes.json();
 
+      const variantJson = await variantRes.json();
       if (variantJson?.data?.productVariantsBulkUpdate?.userErrors?.length) {
         return json({
           error: "Variant bulk update failed",
@@ -132,14 +139,20 @@ export const action = async ({ request }) => {
       }
     }
 
-    // ✅ Update metafields
+    // ✅ Update product metafields
     if (metafields.length > 0) {
       await updateMetafields(admin, productIdNew, metafields);
+    }
+
+    // ✅ Update variant metafields
+    if (variantMetafields.length > 0) {
+      await updateMetafields(admin, variantIdNew, variantMetafields);
     }
 
     return json({
       action: "created",
       productId: productIdNew,
+      variantId: variantIdNew,
       variantUpdated: !!sku
     });
 
@@ -149,9 +162,8 @@ export const action = async ({ request }) => {
   }
 };
 
-
-// ✅ Reusable metafield update function
-async function updateMetafields(admin, productId, metafields) {
+// ✅ Reusable metafield update function (for both product & variant)
+async function updateMetafields(admin, ownerId, metafields) {
   const mutation = `
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -170,7 +182,7 @@ async function updateMetafields(admin, productId, metafields) {
   `;
 
   const inputs = metafields.map((field) => ({
-    ownerId: productId,
+    ownerId,
     namespace: field.namespace || "custom",
     key: field.key,
     type: field.type, // e.g., "single_line_text_field"
