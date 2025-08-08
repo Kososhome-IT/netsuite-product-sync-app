@@ -65,7 +65,7 @@ export async function fetchNetSuiteInventoryItemsWithDetails() {
   try {
     // STEP 1: Fetch list of inventory item IDs
     const listData = await fetchWithOAuth(baseUrl);
-    const items = listData.items?.slice(0, 50) || [];
+    const items = listData.items?.slice(0, 2) || [];
 
     const detailedItems = [];
 

@@ -3,12 +3,14 @@
   border: 1px solid #d1d5db; /* Tailwind gray-300 */
   padding: 0.4rem 1rem;
   text-align: left;
+  font-family: serif;
 }
 .netsuite-table{
     border-collapse: collapse;
 }
 .netsuite-table th {
   background-color: #f3f4f6; /* Tailwind gray-100 */
+  font-family: serif;
 }
 
 .netsuite-table tr:hover {

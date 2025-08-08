@@ -1,6 +1,6 @@
-// app/routes/netsuite-product-sync.jsx
 import { json } from "@remix-run/node";
 import { unauthenticated } from "../shopify.server";
+import { insertLog } from "../utils/insert-dashboard-log"; // ✅ Import log function
 
 export const action = async ({ request }) => {
   const storeDomain = "dummy-ranjit.myshopify.com";
@@ -14,6 +14,7 @@ export const action = async ({ request }) => {
       descriptionHtml,
       metafields = [],
       variantMetafields = [],
+      netsuite_user = "unknown_user" // ✅ Ensure we get username from payload
     } = payload;
 
     if (!title) {
@@ -33,6 +34,7 @@ export const action = async ({ request }) => {
                 id
                 product {
                   id
+                  title
                 }
               }
             }
@@ -58,7 +60,7 @@ export const action = async ({ request }) => {
           }
         }
       `;
-      await admin.graphql(updateMutation, {
+      const updateRes = await admin.graphql(updateMutation, {
         variables: {
           input: {
             id: productId,
@@ -67,6 +69,7 @@ export const action = async ({ request }) => {
           },
         },
       });
+      const updateJson = await updateRes.json();
 
       // ✅ Update product metafields
       if (metafields.length > 0) {
@@ -78,6 +81,14 @@ export const action = async ({ request }) => {
         await updateMetafields(admin, variantId, variantMetafields);
       }
 
+      // ✅ Insert log for updated product
+      await insertLog({
+        netsuite_user,
+        sku,
+        shopify_product_id: productId,
+        product_name: title
+      });
+
       return json({ action: "updated", productId, variantId });
     }
 
@@ -87,6 +98,7 @@ export const action = async ({ request }) => {
         productCreate(input: $input) {
           product {
             id
+            title
             variants(first: 1) {
               edges { node { id } }
             }
@@ -140,14 +152,11 @@ export const action = async ({ request }) => {
       });
 
       const variantJson = await variantRes.json();
-      if (
-        variantJson?.data?.productVariantsBulkUpdate?.userErrors?.length
-      ) {
+      if (variantJson?.data?.productVariantsBulkUpdate?.userErrors?.length) {
         return json(
           {
             error: "Variant bulk update failed",
-            details:
-              variantJson.data.productVariantsBulkUpdate.userErrors,
+            details: variantJson.data.productVariantsBulkUpdate.userErrors,
           },
           { status: 500 }
         );
@@ -163,6 +172,14 @@ export const action = async ({ request }) => {
     if (variantMetafields.length > 0) {
       await updateMetafields(admin, variantIdNew, variantMetafields);
     }
+
+    // ✅ Insert log for created product
+    await insertLog({
+      netsuite_user,
+      sku,
+      shopify_product_id: productIdNew,
+      product_name: title
+    });
 
     return json({
       action: "created",
@@ -199,7 +216,6 @@ async function updateMetafields(admin, ownerId, metafields) {
     }
   `;
 
-  // Split into chunks of 25
   const chunkSize = 25;
   for (let i = 0; i < metafields.length; i += chunkSize) {
     const chunk = metafields.slice(i, i + chunkSize);
@@ -207,13 +223,12 @@ async function updateMetafields(admin, ownerId, metafields) {
     const inputs = chunk.map((field) => {
       let value = field.value;
 
-      // ✅ Ensure all values are strings as required by Shopify
       switch (field.type?.toLowerCase()) {
         case "integer":
         case "number_integer":
         case "decimal":
         case "boolean":
-          value = String(value); // must be a string
+          value = String(value);
           break;
         case "json":
           value =

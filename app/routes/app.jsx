@@ -19,12 +19,9 @@ export default function App() {
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <NavMenu>
-        <Link to="/app" rel="home">
-          Home
-        </Link>
-        <Link to="/app/additional">Additional page</Link>
-        <Link to="/netsuite-products">Products</Link>
-        <Link to="/product-update">Products update</Link>
+        <Link to="/app" rel="home">Home</Link>
+        <Link to="/app/dashboard">Dashboard</Link>
+        <Link to="/app/netsuite-products">Products</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
