@@ -16,6 +16,9 @@ RUN npm remove @shopify/cli
 
 COPY . .
 
+# Optional: helps some crypto builds
+ENV NODE_OPTIONS=--openssl-legacy-provider
+
 RUN npm run build
 
 CMD ["npm", "run", "docker-start"]
