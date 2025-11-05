@@ -21,7 +21,6 @@ export default function App() {
       <NavMenu>
         <Link to="/app" rel="home">Home</Link>
         <Link to="/app/dashboard">Dashboard</Link>
-        <Link to="/app/netsuite-products">Products</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
