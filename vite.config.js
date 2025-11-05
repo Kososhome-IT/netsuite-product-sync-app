@@ -61,11 +61,6 @@ export default defineConfig({
       },
     }),
     tsconfigPaths(),
-
-    // ✅ Added fix: Node.js built-in module polyfills
-    nodePolyfills({
-      protocolImports: true,
-    }),
   ],
   build: {
     assetsInlineLimit: 0,
