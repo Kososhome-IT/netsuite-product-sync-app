@@ -2,13 +2,11 @@ import { vitePlugin as remix } from "@remix-run/dev";
 import { installGlobals } from "@remix-run/node";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { NodeGlobalsPolyfillPlugin, NodeModulesPolyfillPlugin } from "@esbuild-plugins/node-modules-polyfill";
-
 
 installGlobals({ nativeFetch: true });
 
 // Related: https://github.com/remix-run/remix/issues/2835#issuecomment-1144102176
-// Replace the HOST env var with SHOPIFY_APP_URL so that it doesn't break the remix server. 
+// Replace the HOST env var with SHOPIFY_APP_URL so that it doesn't break the remix server.
 if (
   process.env.HOST &&
   (!process.env.SHOPIFY_APP_URL ||
@@ -18,7 +16,10 @@ if (
   delete process.env.HOST;
 }
 
-const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost").hostname;
+const host = new URL(
+  process.env.SHOPIFY_APP_URL || "http://localhost",
+).hostname;
+
 let hmrConfig;
 
 if (host === "localhost") {
@@ -31,8 +32,8 @@ if (host === "localhost") {
 } else {
   hmrConfig = {
     protocol: "wss",
-    host: host,
-    port: parseInt(process.env.FRONTEND_PORT) || 8002,
+    host,
+    port: parseInt(process.env.FRONTEND_PORT || "8002", 10),
     clientPort: 443,
   };
 }
@@ -46,7 +47,6 @@ export default defineConfig({
     port: Number(process.env.PORT || 3000),
     hmr: hmrConfig,
     fs: {
-      // See https://vitejs.dev/config/server-options.html#server-fs-allow
       allow: ["app", "node_modules"],
     },
   },
@@ -63,11 +63,6 @@ export default defineConfig({
       },
     }),
     tsconfigPaths(),
-
-    // ✅ Added fix: Node.js built-in module polyfills
-    nodePolyfills({
-      protocolImports: true,
-    }),
   ],
   build: {
     assetsInlineLimit: 0,

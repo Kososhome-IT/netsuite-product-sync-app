@@ -5,7 +5,7 @@ CREATE TABLE "Session" (
     "state" TEXT NOT NULL,
     "isOnline" BOOLEAN NOT NULL DEFAULT false,
     "scope" TEXT,
-    "expires" DATETIME,
+    "expires" TIMESTAMPTZ,
     "accessToken" TEXT NOT NULL,
     "userId" BIGINT,
     "firstName" TEXT,
@@ -15,4 +15,11 @@ CREATE TABLE "Session" (
     "locale" TEXT,
     "collaborator" BOOLEAN DEFAULT false,
     "emailVerified" BOOLEAN DEFAULT false
+);
+CREATE TABLE dashboard_logs (
+  id          SERIAL PRIMARY KEY,
+  shop        TEXT NOT NULL,
+  message     TEXT,
+  status      TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
 );
