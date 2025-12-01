@@ -1,12 +1,14 @@
-// Create the pool once and reuse it everywhere
-import { Pool } from 'pg';
+// app/utils/db.psql.js
+import "dotenv/config"; 
+import { Pool } from "pg";
 
 export const pool = new Pool({
-  user: 'shopifyapp',
-  host: 'localhost',
-  database: 'ch_shopify_app',
-  password: 'root',
-  port: 5432,
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: Number(process.env.DB_PORT || 5432),
+  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
 });
 
 export async function query(text, params) {
