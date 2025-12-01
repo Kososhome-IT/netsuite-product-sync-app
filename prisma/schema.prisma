@@ -33,13 +33,14 @@ model Session {
 }
 
 model DashboardLog {
-  id         Int      @id @default(autoincrement())
-  shop       String?
-  action     String?
-  status     String?
-  message    String?
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @map("updated_at")
+  id            Int      @id @default(autoincrement())
+  shop          String?
+  action        String?
+  status        String?
+  message       String?
+  netsuiteUser  String?   @map("netsuite_user")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
 
   @@map("dashboard_logs")
 }
