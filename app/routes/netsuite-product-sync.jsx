@@ -3,7 +3,7 @@ import { unauthenticated } from "../shopify.server";
 import { insertLog } from "../utils/insert-dashboard-log"; // ✅ Import log function
 
 export const action = async ({ request }) => {
-  const storeDomain = "dummy-ranjit.myshopify.com";
+  const storeDomain = "project-shibuya.myshopify.com";
 
   try {
     const { admin } = await unauthenticated.admin(storeDomain);
