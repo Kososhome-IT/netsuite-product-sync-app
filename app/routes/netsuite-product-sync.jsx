@@ -21,7 +21,7 @@ export const action = async ({ request }) => {
     /* ----------------------------------------------------
      * 2. SHOP DOMAIN
      * ---------------------------------------------------- */
-    const shop = "dummy-ranjit.myshopify.com";
+    const shop = "project-shibuya.myshopify.com";
 
     /* ----------------------------------------------------
      * 3. LOAD OFFLINE OAUTH SESSION
