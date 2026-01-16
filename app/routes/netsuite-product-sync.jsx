@@ -150,6 +150,44 @@ export const action = async ({ request }) => {
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
     }
+/* =====================================================
+ * UPDATE PRODUCT (TITLE / DESCRIPTION)
+ * ===================================================== */
+const productUpdateRes = await admin.request(
+  `
+  mutation productUpdate($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product { id }
+      userErrors { field message }
+    }
+  }
+  `,
+  {
+    variables: {
+      input: {
+        id: productId,
+        title,
+        descriptionHtml,
+        vendor,
+      },
+    },
+  }
+);
+
+if (
+  productUpdateRes.errors?.graphQLErrors?.length ||
+  productUpdateRes.data?.productUpdate?.userErrors?.length
+) {
+  return json(
+    {
+      error: "Product update failed",
+      details:
+        productUpdateRes.errors?.graphQLErrors ||
+        productUpdateRes.data.productUpdate.userErrors,
+    },
+    { status: 400 }
+  );
+}
 
     /* =====================================================
      * 2️⃣ UPDATE VARIANT (PRICE + BARCODE)
