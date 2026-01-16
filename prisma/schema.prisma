@@ -44,3 +44,16 @@ model DashboardLog {
 
   @@map("dashboard_logs")
 }
+
+model ProductSyncLog {
+  id               Int      @id @default(autoincrement())
+  sku              String
+  action           String   // created | updated | failed
+  productId        String?
+  variantId        String?
+  inventoryItemId  String?
+  title            String?
+  payload          Json?
+  error            Json?
+  createdAt        DateTime @default(now())
+}
