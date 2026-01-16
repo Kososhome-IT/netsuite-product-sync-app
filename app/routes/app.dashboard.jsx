@@ -2,97 +2,141 @@ import {
   Box,
   Card,
   Layout,
-   DataTable,
-  Link,
-  List,
+  DataTable,
   Page,
   Text,
   Divider,
-  Badge ,
+  Badge,
   BlockStack,
+  InlineStack,
 } from "@shopify/polaris";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { query } from "../utils/db.psql";
 import { TitleBar } from "@shopify/app-bridge-react";
-// import { AppProvider } from "@shopify/shopify-app-remix/react";
+
+/* =====================================================
+ * LOADER
+ * ===================================================== */
 export const loader = async () => {
-  const res = await query('SELECT * FROM dashboard_logs ORDER BY updated_at DESC');
+  const res = await query(`
+    SELECT
+      id,
+      shop,
+      netsuite_user,
+      product_sku,
+      shopify_product_id,
+      product_name,
+      action,
+      status,
+      error_message,
+      updated_at
+    FROM dashboard_logs
+    ORDER BY updated_at DESC
+    LIMIT 100
+  `);
+
   return json(res.rows);
 };
 
+/* =====================================================
+ * PAGE
+ * ===================================================== */
 export default function DashboardPage() {
-  const data = useLoaderData();
+  const logs = useLoaderData();
 
-   const rows = data.map(entry => [
-    <Text fontWeight="semibold" key={`user-${entry.id}`}>{entry.netsuite_user}</Text>,
-    entry.product_sku,
-    <Badge key={`badge-${entry.id}`} status="info">{entry.shopify_product_id}</Badge>,
-    entry.product_name,
+  const rows = logs.map((entry) => [
+    <Text as="span" fontWeight="medium" key={`user-${entry.id}`}>
+      {entry.netsuite_user || "—"}
+    </Text>,
+
+    entry.product_sku || "—",
+
+    <Text as="span" key={`pid-${entry.id}`} tone="subdued">
+      {entry.shopify_product_id || "—"}
+    </Text>,
+
+    entry.product_name || "—",
+
+    <Badge
+      key={`action-${entry.id}`}
+      tone={entry.action === "created" ? "success" : "info"}
+    >
+      {entry.action}
+    </Badge>,
+
+    <Badge
+      key={`status-${entry.id}`}
+      tone={entry.status === "success" ? "success" : "critical"}
+    >
+      {entry.status}
+    </Badge>,
+
     <Text
-      variant="bodySm"
       as="span"
+      variant="bodySm"
       tone="subdued"
       key={`date-${entry.id}`}
     >
       {new Date(entry.updated_at).toLocaleString()}
     </Text>,
   ]);
+
   return (
-   
     <Page>
-    <TitleBar title="Dashboard"></TitleBar>
+      <TitleBar title="Sync Dashboard" />
+
       <Layout>
         <Layout.Section>
-             <BlockStack gap="300">
-          <Card  roundedAbove="sm"
-            padding="400"
-            background="bg-surface"
-            shadow="md">
-             <Box paddingBlockEnd="300">
-              <Text variant="headingMd" as="h2">
-                Recently Synced Products
-              </Text>
-            </Box>
+          <BlockStack gap="400">
+            <Card padding="400">
+              <InlineStack align="space-between">
+                <Text variant="headingMd" as="h2">
+                  Recent Sync Activity
+                </Text>
+                <Badge tone="info">{logs.length} records</Badge>
+              </InlineStack>
 
-            <Divider />
-            <Box
-              border="base"
-              borderRadius="300"
-              overflowX="auto"
-              background="bg-subdued"
-              padding="200"
-              >
-                
-            <DataTable
-            columnContentTypes={['text', 'text', 'text', 'text', 'text']}
-            headings={['NetSuite User', 'SKU', 'Product ID', 'Name', 'Updated At']}
-            rows={rows}
-          />
-            </Box>
-          </Card>
-            </BlockStack>
+              <Box paddingBlockStart="300" paddingBlockEnd="200">
+                <Text variant="bodySm" tone="subdued">
+                  Displays the most recent product sync operations from NetSuite
+                  to Shopify.
+                </Text>
+              </Box>
+
+              <Divider />
+
+              <Box paddingBlockStart="300" overflowX="auto">
+                {rows.length === 0 ? (
+                  <Text tone="subdued">No logs available.</Text>
+                ) : (
+                  <DataTable
+                    columnContentTypes={[
+                      "text",
+                      "text",
+                      "text",
+                      "text",
+                      "text",
+                      "text",
+                      "text",
+                    ]}
+                    headings={[
+                      "NetSuite User",
+                      "SKU",
+                      "Shopify Product ID",
+                      "Product Name",
+                      "Action",
+                      "Status",
+                      "Updated At",
+                    ]}
+                    rows={rows}
+                  />
+                )}
+              </Box>
+            </Card>
+          </BlockStack>
         </Layout.Section>
-       
       </Layout>
     </Page>
-   
-  );
-}
-
-function Code({ children }) {
-  return (
-    <Box
-      as="span"
-      padding="025"
-      paddingInlineStart="100"
-      paddingInlineEnd="100"
-      background="bg-surface-active"
-      borderWidth="025"
-      borderColor="border"
-      borderRadius="100"
-    >
-      <code>{children}</code>
-    </Box>
   );
 }

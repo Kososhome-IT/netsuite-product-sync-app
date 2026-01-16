@@ -2,6 +2,7 @@ import { json } from "@remix-run/node";
 import { createAdminApiClient } from "@shopify/admin-api-client";
 import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
+import { insertLog } from "../utils/insert-dashboard-log";
 
 /**
  * POST /product-sync
@@ -9,11 +10,21 @@ import { sessionStorage } from "../shopify.server";
  * - Update product if found
  * - Create product if not found
  * - Update variant + inventory item + metafields
+ * - Log every sync to dashboard
  */
 export const action = async ({ request }) => {
+  const shop = "dummy-ranjit.myshopify.com";
+
+  let productId;
+  let variantId;
+  let inventoryItemId;
+  let actionType = "updated";
+  let sku;
+  let title;
+  let netsuite_user = "system";
+
   try {
     /* ---------------- SHOP SESSION ---------------- */
-    const shop = "dummy-ranjit.myshopify.com";
     const session = await sessionStorage.loadSession(`offline_${shop}`);
 
     if (!session) {
@@ -28,10 +39,15 @@ export const action = async ({ request }) => {
 
     /* ---------------- PAYLOAD ---------------- */
     const payload = await request.json();
-    const {
+
+    ({
       title,
-      descriptionHtml = "",
       sku,
+      netsuite_user = "system",
+    } = payload);
+
+    const {
+      descriptionHtml = "",
       vendor,
       price = "0.00",
       barcode,
@@ -46,7 +62,7 @@ export const action = async ({ request }) => {
     }
 
     /* =====================================================
-     * 0️⃣ SEARCH PRODUCT BY SKU (IDEMPOTENCY)
+     * 0️⃣ SEARCH PRODUCT BY SKU
      * ===================================================== */
     const searchRes = await admin.request(
       `
@@ -62,15 +78,8 @@ export const action = async ({ request }) => {
         }
       }
       `,
-      {
-        variables: { query: `sku:${sku}` },
-      }
+      { variables: { query: `sku:${sku}` } }
     );
-
-    let productId;
-    let variantId;
-    let inventoryItemId;
-    let actionType = "updated";
 
     const existingVariant =
       searchRes.data?.productVariants?.edges?.[0]?.node;
@@ -105,20 +114,11 @@ export const action = async ({ request }) => {
         productRes.errors?.graphQLErrors?.length ||
         productRes.data?.productCreate?.userErrors?.length
       ) {
-        return json(
-          {
-            error: "Product creation failed",
-            details:
-              productRes.errors?.graphQLErrors ||
-              productRes.data.productCreate.userErrors,
-          },
-          { status: 400 }
-        );
+        throw new Error("Product creation failed");
       }
 
       productId = productRes.data.productCreate.product.id;
 
-      /* Get default variant + inventory item */
       const productQueryRes = await admin.request(
         `
         query ($id: ID!) {
@@ -143,56 +143,38 @@ export const action = async ({ request }) => {
       variantId = node.id;
       inventoryItemId = node.inventoryItem.id;
     } else {
-      /* =====================================================
-       * SKU FOUND → REUSE EXISTING PRODUCT
-       * ===================================================== */
       productId = existingVariant.product.id;
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
     }
-/* =====================================================
- * UPDATE PRODUCT (TITLE / DESCRIPTION)
- * ===================================================== */
-const productUpdateRes = await admin.request(
-  `
-  mutation productUpdate($input: ProductInput!) {
-    productUpdate(input: $input) {
-      product { id }
-      userErrors { field message }
-    }
-  }
-  `,
-  {
-    variables: {
-      input: {
-        id: productId,
-        title,
-        descriptionHtml,
-        vendor,
-      },
-    },
-  }
-);
-
-if (
-  productUpdateRes.errors?.graphQLErrors?.length ||
-  productUpdateRes.data?.productUpdate?.userErrors?.length
-) {
-  return json(
-    {
-      error: "Product update failed",
-      details:
-        productUpdateRes.errors?.graphQLErrors ||
-        productUpdateRes.data.productUpdate.userErrors,
-    },
-    { status: 400 }
-  );
-}
 
     /* =====================================================
-     * 2️⃣ UPDATE VARIANT (PRICE + BARCODE)
+     * UPDATE PRODUCT (TITLE / DESCRIPTION)
      * ===================================================== */
-    const variantUpdateRes = await admin.request(
+    await admin.request(
+      `
+      mutation productUpdate($input: ProductInput!) {
+        productUpdate(input: $input) {
+          userErrors { field message }
+        }
+      }
+      `,
+      {
+        variables: {
+          input: {
+            id: productId,
+            title,
+            descriptionHtml,
+            vendor,
+          },
+        },
+      }
+    );
+
+    /* =====================================================
+     * UPDATE VARIANT (PRICE + BARCODE)
+     * ===================================================== */
+    await admin.request(
       `
       mutation ProductVariantsBulkUpdate(
         $productId: ID!,
@@ -221,32 +203,16 @@ if (
       }
     );
 
-    if (
-      variantUpdateRes.errors?.graphQLErrors?.length ||
-      variantUpdateRes.data?.productVariantsBulkUpdate?.userErrors?.length
-    ) {
-      return json(
-        {
-          error: "Variant update failed",
-          details:
-            variantUpdateRes.errors?.graphQLErrors ||
-            variantUpdateRes.data.productVariantsBulkUpdate.userErrors,
-        },
-        { status: 400 }
-      );
-    }
-
     /* =====================================================
-     * 3️⃣ UPDATE INVENTORY ITEM (SKU + PHYSICAL DATA)
+     * UPDATE INVENTORY ITEM
      * ===================================================== */
-    const inventoryRes = await admin.request(
+    await admin.request(
       `
       mutation InventoryItemUpdate(
         $id: ID!,
         $input: InventoryItemInput!
       ) {
         inventoryItemUpdate(id: $id, input: $input) {
-          inventoryItem { id }
           userErrors { field message }
         }
       }
@@ -272,23 +238,8 @@ if (
       }
     );
 
-    if (
-      inventoryRes.errors?.graphQLErrors?.length ||
-      inventoryRes.data?.inventoryItemUpdate?.userErrors?.length
-    ) {
-      return json(
-        {
-          error: "Inventory update failed",
-          details:
-            inventoryRes.errors?.graphQLErrors ||
-            inventoryRes.data.inventoryItemUpdate.userErrors,
-        },
-        { status: 400 }
-      );
-    }
-
     /* =====================================================
-     * 4️⃣ PRODUCT METAFIELDS (BATCHED)
+     * METAFIELDS
      * ===================================================== */
     const CHUNK_SIZE = 25;
     for (let i = 0; i < metafields.length; i += CHUNK_SIZE) {
@@ -316,6 +267,19 @@ if (
       );
     }
 
+    /* =====================================================
+     * ✅ SUCCESS LOG
+     * ===================================================== */
+    await insertLog({
+      shop,
+      netsuite_user,
+      product_sku: sku,
+      shopify_product_id: productId,
+      product_name: title,
+      action: actionType,
+      status: "success",
+    });
+
     return json({
       success: true,
       action: actionType,
@@ -325,7 +289,23 @@ if (
       sku,
     });
   } catch (error) {
-    console.error("❌ Error:", error);
+    console.error("❌ Sync failed:", error);
+
+    /* =====================================================
+     * ❌ FAILURE LOG
+     * ===================================================== */
+    await insertLog({
+      shop,
+      netsuite_user,
+      product_sku: sku ?? "unknown",
+      shopify_product_id: productId ?? null,
+      product_name: title ?? null,
+      action: actionType,
+      status: "failed",
+      error_stage: "sync",
+      error_message: error.message,
+    });
+
     return json(
       { error: "Failed", details: error.message },
       { status: 500 }
