@@ -287,6 +287,13 @@ export const action = async ({ request }) => {
     /* =====================================================
      * ✅ SUCCESS LOG
      * ===================================================== */
+    console.log("🧾 ABOUT TO INSERT LOG", {
+  shop,
+  sku,
+  productId,
+  actionType,
+});
+
     await insertLog({
       shop,
       netsuite_user,
@@ -311,6 +318,13 @@ export const action = async ({ request }) => {
     /* =====================================================
      * ❌ FAILURE LOG
      * ===================================================== */
+    console.log("🧾 ABOUT TO INSERT LOG", {
+  shop,
+  sku,
+  productId,
+  actionType,
+});
+
     await insertLog({
       shop,
       netsuite_user,
