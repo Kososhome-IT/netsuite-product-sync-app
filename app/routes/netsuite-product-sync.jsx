@@ -2,11 +2,13 @@ import { json } from "@remix-run/node";
 import { createAdminApiClient } from "@shopify/admin-api-client";
 import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
-import { insertLog } from "../utils/insert-dashboard-log";
 
 /**
  * POST /product-sync
- * External system → Remix app → Offline OAuth session → Shopify Admin API
+ * - Search by SKU
+ * - Update product if found
+ * - Create product if not found
+ * - Update variant + inventory item + metafields
  */
 export const action = async ({ request }) => {
   try {
@@ -31,79 +33,74 @@ export const action = async ({ request }) => {
     const session = await sessionStorage.loadSession(offlineSessionId);
 
     if (!session) {
-      return json(
-        {
-          error:
-            "Offline Shopify session not found. Please reinstall the app.",
-        },
-        { status: 401 }
-      );
+      return json({ error: "Offline session missing" }, { status: 401 });
     }
 
-    /* ----------------------------------------------------
-     * 4. CREATE ADMIN API CLIENT (CORRECT WAY)
-     * ---------------------------------------------------- */
     const admin = createAdminApiClient({
       storeDomain: shop,
-      apiVersion: ApiVersion.January24,
+      apiVersion: ApiVersion.April25,
       accessToken: session.accessToken,
     });
 
-    /* ----------------------------------------------------
-     * 5. READ PAYLOAD
-     * ---------------------------------------------------- */
+    /* ---------------- PAYLOAD ---------------- */
     const payload = await request.json();
     const {
-      sku,
       title,
-      descriptionHtml,
+      descriptionHtml = "",
+      sku,
+      vendor,
+      price = "0.00",
+      barcode,
+      hs_code,
+      country_of_origin,
+      weight,
       metafields = [],
-      variantMetafields = [],
-      netsuite_user = "unknown_user",
     } = payload;
 
-    if (!title) {
-      return json({ error: "Title is required" }, { status: 400 });
+    if (!title || !sku) {
+      return json({ error: "title and sku are required" }, { status: 400 });
     }
 
-    let productId = null;
-    let variantId = null;
-
-    /* ----------------------------------------------------
-     * 6. FIND PRODUCT BY SKU
-     * ---------------------------------------------------- */
-    if (sku) {
-      const res = await admin.request(
-        `
-        query ($query: String!) {
-          productVariants(first: 1, query: $query) {
-            edges {
-              node {
-                id
-                product { id title }
-              }
+    /* =====================================================
+     * 0️⃣ SEARCH PRODUCT BY SKU (IDEMPOTENCY)
+     * ===================================================== */
+    const searchRes = await admin.request(
+      `
+      query ($query: String!) {
+        productVariants(first: 1, query: $query) {
+          edges {
+            node {
+              id
+              product { id }
+              inventoryItem { id }
             }
           }
         }
-        `,
-        { variables: { query: `sku:${sku}` } }
-      );
-
-      const edge = res.data?.productVariants?.edges?.[0];
-      if (edge) {
-        productId = edge.node.product.id;
-        variantId = edge.node.id;
       }
-    }
+      `,
+      {
+        variables: { query: `sku:${sku}` },
+      }
+    );
 
-    /* ----------------------------------------------------
-     * 7. UPDATE PRODUCT IF EXISTS
-     * ---------------------------------------------------- */
-    if (productId && variantId) {
-      await admin.request(
+    let productId;
+    let variantId;
+    let inventoryItemId;
+    let actionType = "updated";
+
+    const existingVariant =
+      searchRes.data?.productVariants?.edges?.[0]?.node;
+
+    /* =====================================================
+     * 1️⃣ CREATE PRODUCT IF SKU NOT FOUND
+     * ===================================================== */
+    if (!existingVariant) {
+      actionType = "created";
+
+      const productRes = await admin.request(
         `
-        mutation productUpdate($input: ProductInput!) {
-          productUpdate(input: $input) {
+        mutation productCreate($input: ProductInput!) {
+          productCreate(input: $input) {
             product { id }
             userErrors { field message }
           }
@@ -112,183 +109,204 @@ export const action = async ({ request }) => {
         {
           variables: {
             input: {
-              id: productId,
               title,
-              descriptionHtml: descriptionHtml || "",
+              vendor,
+              descriptionHtml,
             },
           },
         }
       );
 
-      if (metafields.length) {
-        await updateMetafields(admin, productId, metafields);
+      if (
+        productRes.errors?.graphQLErrors?.length ||
+        productRes.data?.productCreate?.userErrors?.length
+      ) {
+        return json(
+          {
+            error: "Product creation failed",
+            details:
+              productRes.errors?.graphQLErrors ||
+              productRes.data.productCreate.userErrors,
+          },
+          { status: 400 }
+        );
       }
 
-      if (variantMetafields.length) {
-        await updateMetafields(admin, variantId, variantMetafields);
-      }
+      productId = productRes.data.productCreate.product.id;
 
-      await insertLog({
-        netsuite_user,
-        sku,
-        shopify_product_id: productId,
-        product_name: title,
-      });
-
-      return json({ action: "updated", productId, variantId });
-    }
-
-    /* ----------------------------------------------------
-     * 8. CREATE PRODUCT
-     * ---------------------------------------------------- */
-    const createRes = await admin.request(
-      `
-      mutation productCreate($input: ProductInput!) {
-        productCreate(input: $input) {
-          product {
-            id
+      /* Get default variant + inventory item */
+      const productQueryRes = await admin.request(
+        `
+        query ($id: ID!) {
+          product(id: $id) {
             variants(first: 1) {
-              edges { node { id } }
+              edges {
+                node {
+                  id
+                  inventoryItem { id }
+                }
+              }
             }
           }
+        }
+        `,
+        { variables: { id: productId } }
+      );
+
+      const node =
+        productQueryRes.data.product.variants.edges[0].node;
+
+      variantId = node.id;
+      inventoryItemId = node.inventoryItem.id;
+    } else {
+      /* =====================================================
+       * SKU FOUND → REUSE EXISTING PRODUCT
+       * ===================================================== */
+      productId = existingVariant.product.id;
+      variantId = existingVariant.id;
+      inventoryItemId = existingVariant.inventoryItem.id;
+    }
+
+    /* =====================================================
+     * 2️⃣ UPDATE VARIANT (PRICE + BARCODE)
+     * ===================================================== */
+    const variantUpdateRes = await admin.request(
+      `
+      mutation ProductVariantsBulkUpdate(
+        $productId: ID!,
+        $variants: [ProductVariantsBulkInput!]!
+      ) {
+        productVariantsBulkUpdate(
+          productId: $productId,
+          variants: $variants
+        ) {
           userErrors { field message }
         }
       }
       `,
       {
         variables: {
+          productId,
+          variants: [
+            {
+              id: variantId,
+              price: String(price),
+              inventoryPolicy: "DENY",
+              barcode,
+            },
+          ],
+        },
+      }
+    );
+
+    if (
+      variantUpdateRes.errors?.graphQLErrors?.length ||
+      variantUpdateRes.data?.productVariantsBulkUpdate?.userErrors?.length
+    ) {
+      return json(
+        {
+          error: "Variant update failed",
+          details:
+            variantUpdateRes.errors?.graphQLErrors ||
+            variantUpdateRes.data.productVariantsBulkUpdate.userErrors,
+        },
+        { status: 400 }
+      );
+    }
+
+    /* =====================================================
+     * 3️⃣ UPDATE INVENTORY ITEM (SKU + PHYSICAL DATA)
+     * ===================================================== */
+    const inventoryRes = await admin.request(
+      `
+      mutation InventoryItemUpdate(
+        $id: ID!,
+        $input: InventoryItemInput!
+      ) {
+        inventoryItemUpdate(id: $id, input: $input) {
+          inventoryItem { id }
+          userErrors { field message }
+        }
+      }
+      `,
+      {
+        variables: {
+          id: inventoryItemId,
           input: {
-            title,
-            descriptionHtml: descriptionHtml || "",
+            sku,
+            tracked: true,
+            harmonizedSystemCode: hs_code,
+            countryCodeOfOrigin: country_of_origin?.toUpperCase(),
+            ...(Number.isFinite(Number(weight)) && {
+              measurement: {
+                weight: {
+                  value: Number(weight),
+                  unit: "POUNDS",
+                },
+              },
+            }),
           },
         },
       }
     );
-console.log(
-  "RAW productCreate response:",
-  JSON.stringify(createRes, null, 2)
-);
-    const productCreatePayload = createRes.data?.productCreate;
 
-if (productCreatePayload?.userErrors?.length) {
-  console.error("❌ Shopify productCreate userErrors:", productCreatePayload.userErrors);
+    if (
+      inventoryRes.errors?.graphQLErrors?.length ||
+      inventoryRes.data?.inventoryItemUpdate?.userErrors?.length
+    ) {
+      return json(
+        {
+          error: "Inventory update failed",
+          details:
+            inventoryRes.errors?.graphQLErrors ||
+            inventoryRes.data.inventoryItemUpdate.userErrors,
+        },
+        { status: 400 }
+      );
+    }
 
-  return json(
-    {
-      error: "Product creation failed",
-      shopifyErrors: productCreatePayload.userErrors,
-    },
-    { status: 400 }
-  );
-}
+    /* =====================================================
+     * 4️⃣ PRODUCT METAFIELDS (BATCHED)
+     * ===================================================== */
+    const CHUNK_SIZE = 25;
+    for (let i = 0; i < metafields.length; i += CHUNK_SIZE) {
+      const chunk = metafields.slice(i, i + CHUNK_SIZE);
 
-const product = productCreatePayload?.product;
-
-if (!product) {
-  return json(
-    {
-      error: "Product creation failed",
-      details: "No product returned and no userErrors",
-    },
-    { status: 500 }
-  );
-}
-
-    const newProductId = product.id;
-    const newVariantId = product.variants.edges[0].node.id;
-
-    /* ----------------------------------------------------
-     * 9. SET SKU
-     * ---------------------------------------------------- */
-    if (sku) {
       await admin.request(
         `
-        mutation productVariantsBulkUpdate(
-          $productId: ID!,
-          $variants: [ProductVariantsBulkInput!]!
-        ) {
-          productVariantsBulkUpdate(
-            productId: $productId,
-            variants: $variants
-          ) {
+        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
             userErrors { field message }
           }
         }
         `,
         {
           variables: {
-            productId: newProductId,
-            variants: [
-              {
-                id: newVariantId,
-                inventoryItem: { sku },
-              },
-            ],
+            metafields: chunk.map((mf) => ({
+              ownerId: productId,
+              namespace: mf.namespace || "custom",
+              key: mf.key,
+              type: mf.type,
+              value: String(mf.value),
+            })),
           },
         }
       );
     }
 
-    if (metafields.length) {
-      await updateMetafields(admin, newProductId, metafields);
-    }
-
-    if (variantMetafields.length) {
-      await updateMetafields(admin, newVariantId, variantMetafields);
-    }
-
-    await insertLog({
-      netsuite_user,
-      sku,
-      shopify_product_id: newProductId,
-      product_name: title,
-    });
-
     return json({
-      action: "created",
-      productId: newProductId,
-      variantId: newVariantId,
+      success: true,
+      action: actionType,
+      productId,
+      variantId,
+      inventoryItemId,
+      sku,
     });
   } catch (error) {
-    console.error("❌ Shopify Sync Error:", error);
+    console.error("❌ Error:", error);
     return json(
-      { error: "Failed to sync", details: error.message },
+      { error: "Failed", details: error.message },
       { status: 500 }
     );
   }
 };
-
-/* ----------------------------------------------------
- * METAFIELD HELPER
- * ---------------------------------------------------- */
-async function updateMetafields(admin, ownerId, metafields) {
-  const chunkSize = 25;
-
-  for (let i = 0; i < metafields.length; i += chunkSize) {
-    const chunk = metafields.slice(i, i + chunkSize);
-
-    await admin.request(
-      `
-      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          userErrors { field message }
-        }
-      }
-      `,
-      {
-        variables: {
-          metafields: chunk.map((f) => ({
-            ownerId,
-            namespace: f.namespace || "custom",
-            key: f.key,
-            type: f.type,
-            value:
-              typeof f.value === "object"
-                ? JSON.stringify(f.value)
-                : String(f.value),
-          })),
-        },
-      }
-    );
-  }
-}
