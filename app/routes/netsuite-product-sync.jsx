@@ -12,9 +12,25 @@ import { sessionStorage } from "../shopify.server";
  */
 export const action = async ({ request }) => {
   try {
-    /* ---------------- SHOP SESSION ---------------- */
-    const shop = "dummy-ranjit.myshopify.com";
-    const session = await sessionStorage.loadSession(`offline_${shop}`);
+    /* ----------------------------------------------------
+     * 1. PROTECT ENDPOINT (MANDATORY)
+     * ---------------------------------------------------- */
+    // const authHeader = request.headers.get("authorization");
+    // if (authHeader !== `Bearer ${process.env.SYNC_SECRET}`) {
+    //   return json({ error: "Unauthorized" }, { status: 401 });
+    // }
+
+    /* ----------------------------------------------------
+     * 2. SHOP DOMAIN
+     * ---------------------------------------------------- */
+    const shop = "project-shibuya.myshopify.com";
+
+    /* ----------------------------------------------------
+     * 3. LOAD OFFLINE OAUTH SESSION
+     * Session ID format is ALWAYS: offline_<shop>
+     * ---------------------------------------------------- */
+    const offlineSessionId = `offline_${shop}`;
+    const session = await sessionStorage.loadSession(offlineSessionId);
 
     if (!session) {
       return json({ error: "Offline session missing" }, { status: 401 });
