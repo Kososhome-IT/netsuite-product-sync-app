@@ -4,12 +4,11 @@ import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
 
 /**
- * POST /product-create
- * - Create product
- * - Reuse default variant
- * - Update price (variant)
- * - Update SKU + barcode + country + HS + weight (inventory item)
- * - Update product metafields
+ * POST /product-sync
+ * - Search by SKU
+ * - Update product if found
+ * - Create product if not found
+ * - Update variant + inventory item + metafields
  */
 export const action = async ({ request }) => {
   try {
@@ -43,89 +42,117 @@ export const action = async ({ request }) => {
     } = payload;
 
     if (!title || !sku) {
-      return json(
-        { error: "title and sku are required" },
-        { status: 400 }
-      );
+      return json({ error: "title and sku are required" }, { status: 400 });
     }
 
     /* =====================================================
-     * 1️⃣ CREATE PRODUCT
+     * 0️⃣ SEARCH PRODUCT BY SKU (IDEMPOTENCY)
      * ===================================================== */
-    const productRes = await admin.request(
+    const searchRes = await admin.request(
       `
-      mutation productCreate($input: ProductInput!) {
-        productCreate(input: $input) {
-          product { id }
-          userErrors { field message }
-        }
-      }
-      `,
-      {
-        variables: {
-          input: {
-            title,
-            vendor,
-            descriptionHtml,
-          },
-        },
-      }
-    );
-
-    if (productRes.errors?.graphQLErrors?.length) {
-      return json(
-        { error: "Product creation failed", details: productRes.errors.graphQLErrors },
-        { status: 400 }
-      );
-    }
-
-    const productCreate = productRes.data?.productCreate;
-
-    if (!productCreate || productCreate.userErrors?.length) {
-      return json(
-        { error: "Product creation failed", details: productCreate?.userErrors },
-        { status: 400 }
-      );
-    }
-
-    const productId = productCreate.product.id;
-
-    /* =====================================================
-     * 2️⃣ GET DEFAULT VARIANT + INVENTORY ITEM
-     * ===================================================== */
-    const productQueryRes = await admin.request(
-      `
-      query ($id: ID!) {
-        product(id: $id) {
-          variants(first: 1) {
-            edges {
-              node {
-                id
-                inventoryItem { id }
-              }
+      query ($query: String!) {
+        productVariants(first: 1, query: $query) {
+          edges {
+            node {
+              id
+              product { id }
+              inventoryItem { id }
             }
           }
         }
       }
       `,
-      { variables: { id: productId } }
+      {
+        variables: { query: `sku:${sku}` },
+      }
     );
 
-    const defaultVariant =
-      productQueryRes.data?.product?.variants?.edges?.[0]?.node;
+    let productId;
+    let variantId;
+    let inventoryItemId;
+    let actionType = "updated";
 
-    if (!defaultVariant) {
-      return json(
-        { error: "Default variant not found after product creation" },
-        { status: 500 }
-      );
-    }
-
-    const variantId = defaultVariant.id;
-    const inventoryItemId = defaultVariant.inventoryItem.id;
+    const existingVariant =
+      searchRes.data?.productVariants?.edges?.[0]?.node;
 
     /* =====================================================
-     * 3️⃣ UPDATE VARIANT (PRICE / INVENTORY POLICY ONLY)
+     * 1️⃣ CREATE PRODUCT IF SKU NOT FOUND
+     * ===================================================== */
+    if (!existingVariant) {
+      actionType = "created";
+
+      const productRes = await admin.request(
+        `
+        mutation productCreate($input: ProductInput!) {
+          productCreate(input: $input) {
+            product { id }
+            userErrors { field message }
+          }
+        }
+        `,
+        {
+          variables: {
+            input: {
+              title,
+              vendor,
+              descriptionHtml,
+            },
+          },
+        }
+      );
+
+      if (
+        productRes.errors?.graphQLErrors?.length ||
+        productRes.data?.productCreate?.userErrors?.length
+      ) {
+        return json(
+          {
+            error: "Product creation failed",
+            details:
+              productRes.errors?.graphQLErrors ||
+              productRes.data.productCreate.userErrors,
+          },
+          { status: 400 }
+        );
+      }
+
+      productId = productRes.data.productCreate.product.id;
+
+      /* Get default variant + inventory item */
+      const productQueryRes = await admin.request(
+        `
+        query ($id: ID!) {
+          product(id: $id) {
+            variants(first: 1) {
+              edges {
+                node {
+                  id
+                  inventoryItem { id }
+                }
+              }
+            }
+          }
+        }
+        `,
+        { variables: { id: productId } }
+      );
+
+      const node =
+        productQueryRes.data.product.variants.edges[0].node;
+
+      variantId = node.id;
+      inventoryItemId = node.inventoryItem.id;
+    } else {
+      /* =====================================================
+       * SKU FOUND → REUSE EXISTING PRODUCT
+       * ===================================================== */
+      productId = existingVariant.product.id;
+      variantId = existingVariant.id;
+      inventoryItemId = existingVariant.inventoryItem.id;
+    }
+
+    /* =====================================================
+     * 2️⃣ UPDATE VARIANT (PRICE + BARCODE)
      * ===================================================== */
     const variantUpdateRes = await admin.request(
       `
@@ -172,70 +199,63 @@ export const action = async ({ request }) => {
     }
 
     /* =====================================================
-     * 4️⃣ UPDATE INVENTORY ITEM (SKU + PHYSICAL DATA)
+     * 3️⃣ UPDATE INVENTORY ITEM (SKU + PHYSICAL DATA)
      * ===================================================== */
-      
-      const inventoryRes = await admin.request(
-        `
-        mutation InventoryItemUpdate(
-          $id: ID!,
-          $input: InventoryItemInput!
-        ) {
-          inventoryItemUpdate(id: $id, input: $input) {
-            inventoryItem {
-              id
-              sku
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-        `,
-        {
-          variables: {
-            id: inventoryItemId,   // ✅ REQUIRED TOP-LEVEL ARG
-            input: {
-              sku,                               // ✅ SKU LIVES HERE
-              tracked: true,
-              harmonizedSystemCode: hs_code,
-              countryCodeOfOrigin: country_of_origin?.toUpperCase(),
-
-              ...(weight && {
-                measurement: {
-                  weight: {
-                    value: Number(weight),
-                    unit: "POUNDS",
-                  },
-                },
-              }),
-            },
-          },
-        }
-      );
-
-      /* ---- HANDLE ERRORS ---- */
-      if (
-        inventoryRes.errors?.graphQLErrors?.length ||
-        inventoryRes.data?.inventoryItemUpdate?.userErrors?.length
+    const inventoryRes = await admin.request(
+      `
+      mutation InventoryItemUpdate(
+        $id: ID!,
+        $input: InventoryItemInput!
       ) {
-        return json(
-          {
-            error: "Inventory update failed",
-            details:
-              inventoryRes.errors?.graphQLErrors ||
-              inventoryRes.data.inventoryItemUpdate.userErrors,
-          },
-          { status: 400 }
-        );
+        inventoryItemUpdate(id: $id, input: $input) {
+          inventoryItem { id }
+          userErrors { field message }
+        }
       }
+      `,
+      {
+        variables: {
+          id: inventoryItemId,
+          input: {
+            sku,
+            tracked: true,
+            harmonizedSystemCode: hs_code,
+            countryCodeOfOrigin: country_of_origin?.toUpperCase(),
+            ...(Number.isFinite(Number(weight)) && {
+              measurement: {
+                weight: {
+                  value: Number(weight),
+                  unit: "POUNDS",
+                },
+              },
+            }),
+          },
+        },
+      }
+    );
 
+    if (
+      inventoryRes.errors?.graphQLErrors?.length ||
+      inventoryRes.data?.inventoryItemUpdate?.userErrors?.length
+    ) {
+      return json(
+        {
+          error: "Inventory update failed",
+          details:
+            inventoryRes.errors?.graphQLErrors ||
+            inventoryRes.data.inventoryItemUpdate.userErrors,
+        },
+        { status: 400 }
+      );
+    }
 
     /* =====================================================
-     * 5️⃣ PRODUCT METAFIELDS
+     * 4️⃣ PRODUCT METAFIELDS (BATCHED)
      * ===================================================== */
-    if (metafields.length) {
+    const CHUNK_SIZE = 25;
+    for (let i = 0; i < metafields.length; i += CHUNK_SIZE) {
+      const chunk = metafields.slice(i, i + CHUNK_SIZE);
+
       await admin.request(
         `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -246,7 +266,7 @@ export const action = async ({ request }) => {
         `,
         {
           variables: {
-            metafields: metafields.map((mf) => ({
+            metafields: chunk.map((mf) => ({
               ownerId: productId,
               namespace: mf.namespace || "custom",
               key: mf.key,
@@ -260,6 +280,7 @@ export const action = async ({ request }) => {
 
     return json({
       success: true,
+      action: actionType,
       productId,
       variantId,
       inventoryItemId,
