@@ -4,14 +4,38 @@ import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
 import { insertLog } from "../utils/insert-dashboard-log";
 
-/**
- * POST /product-sync
- * - Search by SKU
- * - Update product if found
- * - Create product if not found
- * - Update variant + inventory item + metafields
- * - Log every sync to dashboard
- */
+/* =====================================================
+ * INVENTORY VERIFICATION (API VERSION SAFE)
+ * ===================================================== */
+const verifyInventory = async ({ admin, inventoryItemId, stage }) => {
+  const res = await admin.request(
+    `
+    query ($id: ID!) {
+      inventoryItem(id: $id) {
+        id
+        inventoryLevels(first: 10) {
+          edges {
+            node {
+              location {
+                name
+              }
+              quantities(names: ["available"]) {
+                name
+                quantity
+              }
+            }
+          }
+        }
+      }
+    }
+    `,
+    { variables: { id: inventoryItemId } }
+  );
+
+  console.log(`📦 INVENTORY VERIFY [${stage}]`, JSON.stringify(res, null, 2));
+  return res;
+};
+
 export const action = async ({ request }) => {
   const shop = "dummy-ranjit.myshopify.com";
 
@@ -54,14 +78,32 @@ export const action = async ({ request }) => {
       accessToken: session.accessToken,
     });
 
+    /* ---------------- LOCATIONS ---------------- */
+    const locationRes = await admin.request(`
+      query {
+        locations(first: 10) {
+          edges {
+            node {
+              id
+              name
+            }
+          }
+        }
+      }
+    `);
+
+    if (!locationRes?.data?.locations?.edges) {
+      throw new Error("Failed to fetch Shopify locations");
+    }
+
+    const locationMap = {};
+    for (const edge of locationRes.data.locations.edges) {
+      locationMap[edge.node.name.toLowerCase()] = edge.node.id;
+    }
+
     /* ---------------- PAYLOAD ---------------- */
     const payload = await request.json();
-
-    ({
-      title,
-      sku,
-      netsuite_user = "system",
-    } = payload);
+    ({ title, sku, netsuite_user = "system" } = payload);
 
     const {
       descriptionHtml = "",
@@ -72,15 +114,14 @@ export const action = async ({ request }) => {
       country_of_origin,
       weight,
       metafields = [],
+      quantity_by_location = {},
     } = payload;
 
     if (!title || !sku) {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
 
-    /* =====================================================
-     * 0️⃣ SEARCH PRODUCT BY SKU
-     * ===================================================== */
+    /* ---------------- SEARCH BY SKU ---------------- */
     const searchRes = await admin.request(
       `
       query ($query: String!) {
@@ -101,9 +142,7 @@ export const action = async ({ request }) => {
     const existingVariant =
       searchRes.data?.productVariants?.edges?.[0]?.node;
 
-    /* =====================================================
-     * 1️⃣ CREATE PRODUCT IF SKU NOT FOUND
-     * ===================================================== */
+    /* ---------------- CREATE PRODUCT ---------------- */
     if (!existingVariant) {
       actionType = "created";
 
@@ -116,21 +155,10 @@ export const action = async ({ request }) => {
           }
         }
         `,
-        {
-          variables: {
-            input: {
-              title,
-              vendor,
-              descriptionHtml,
-            },
-          },
-        }
+        { variables: { input: { title, vendor, descriptionHtml } } }
       );
 
-      if (
-        productRes.errors?.graphQLErrors?.length ||
-        productRes.data?.productCreate?.userErrors?.length
-      ) {
+      if (productRes.data.productCreate.userErrors.length) {
         throw new Error("Product creation failed");
       }
 
@@ -165,9 +193,7 @@ export const action = async ({ request }) => {
       inventoryItemId = existingVariant.inventoryItem.id;
     }
 
-    /* =====================================================
-     * UPDATE PRODUCT (TITLE / DESCRIPTION)
-     * ===================================================== */
+    /* ---------------- UPDATE PRODUCT ---------------- */
     await admin.request(
       `
       mutation productUpdate($input: ProductInput!) {
@@ -178,29 +204,19 @@ export const action = async ({ request }) => {
       `,
       {
         variables: {
-          input: {
-            id: productId,
-            title,
-            descriptionHtml,
-            vendor,
-          },
+          input: { id: productId, title, descriptionHtml, vendor },
         },
       }
     );
 
-    /* =====================================================
-     * UPDATE VARIANT (PRICE + BARCODE)
-     * ===================================================== */
+    /* ---------------- UPDATE VARIANT ---------------- */
     await admin.request(
       `
       mutation ProductVariantsBulkUpdate(
         $productId: ID!,
         $variants: [ProductVariantsBulkInput!]!
       ) {
-        productVariantsBulkUpdate(
-          productId: $productId,
-          variants: $variants
-        ) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
           userErrors { field message }
         }
       }
@@ -213,6 +229,7 @@ export const action = async ({ request }) => {
               id: variantId,
               price: String(price),
               inventoryPolicy: "DENY",
+              inventoryManagement: "SHOPIFY",
               barcode,
             },
           ],
@@ -220,15 +237,10 @@ export const action = async ({ request }) => {
       }
     );
 
-    /* =====================================================
-     * UPDATE INVENTORY ITEM
-     * ===================================================== */
+    /* ---------------- UPDATE INVENTORY ITEM ---------------- */
     await admin.request(
       `
-      mutation InventoryItemUpdate(
-        $id: ID!,
-        $input: InventoryItemInput!
-      ) {
+      mutation InventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
         inventoryItemUpdate(id: $id, input: $input) {
           userErrors { field message }
         }
@@ -255,13 +267,85 @@ export const action = async ({ request }) => {
       }
     );
 
-    /* =====================================================
-     * METAFIELDS
-     * ===================================================== */
+    /* ---------------- VERIFY BEFORE INVENTORY ---------------- */
+    await verifyInventory({ admin, inventoryItemId, stage: "BEFORE" });
+
+    /* ---------------- INVENTORY ACTIVATE + ADJUST ---------------- */
+    if (actionType === "created") {
+      await new Promise((r) => setTimeout(r, 500));
+
+      for (const locationId of Object.values(locationMap)) {
+        await admin.request(
+          `
+          mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!) {
+            inventoryActivate(
+              inventoryItemId: $inventoryItemId
+              locationId: $locationId
+            ) {
+              inventoryLevel { id }
+              userErrors { field message }
+            }
+          }
+          `,
+          { variables: { inventoryItemId, locationId } }
+        );
+      }
+
+      const changes = [];
+      for (const [loc, qty] of Object.entries(quantity_by_location)) {
+        const locationId = locationMap[loc.toLowerCase()];
+        if (!locationId || !Number.isFinite(Number(qty))) continue;
+
+        changes.push({
+          inventoryItemId,
+          locationId,
+          delta: Number(qty), // must be POSITIVE for initial stock
+        });
+      }
+
+      if (changes.length) {
+        const adjustRes = await admin.request(
+          `
+          mutation inventoryAdjustQuantities(
+            $input: InventoryAdjustQuantitiesInput!
+          ) {
+            inventoryAdjustQuantities(input: $input) {
+              userErrors { field message }
+            }
+          }
+          `,
+          {
+            variables: {
+              input: {
+                name: "available",
+                reason: "correction",
+                changes,
+              },
+            },
+          }
+        );
+
+        if (adjustRes.data.inventoryAdjustQuantities.userErrors.length) {
+          throw new Error(
+            JSON.stringify(
+              adjustRes.data.inventoryAdjustQuantities.userErrors
+            )
+          );
+        }
+      }
+    }
+
+    /* ---------------- VERIFY AFTER INVENTORY ---------------- */
+    const verifyAfter = await verifyInventory({
+      admin,
+      inventoryItemId,
+      stage: "AFTER",
+    });
+
+    /* ---------------- METAFIELDS (UNCHANGED) ---------------- */
     const CHUNK_SIZE = 25;
     for (let i = 0; i < metafields.length; i += CHUNK_SIZE) {
       const chunk = metafields.slice(i, i + CHUNK_SIZE);
-
       await admin.request(
         `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -302,6 +386,9 @@ export const action = async ({ request }) => {
       product_name: title,
       action: actionType,
       status: "success",
+      inventory_debug: JSON.stringify(
+        verifyAfter?.data?.inventoryItem?.inventoryLevels?.edges || []
+      ),
     });
 
     return json({
@@ -333,13 +420,9 @@ export const action = async ({ request }) => {
       product_name: title ?? null,
       action: actionType,
       status: "failed",
-      error_stage: "sync",
       error_message: error.message,
     });
 
-    return json(
-      { error: "Failed", details: error.message },
-      { status: 500 }
-    );
+    return json({ error: "Failed", details: error.message }, { status: 500 });
   }
 };
