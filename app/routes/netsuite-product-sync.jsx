@@ -48,8 +48,26 @@ export const action = async ({ request }) => {
   let netsuite_user = "system";
 
   try {
-    /* ---------------- SESSION ---------------- */
-    const session = await sessionStorage.loadSession(`offline_${shop}`);
+    /* ----------------------------------------------------
+     * 1. PROTECT ENDPOINT (MANDATORY)
+     * ---------------------------------------------------- */
+    // const authHeader = request.headers.get("authorization");
+    // if (authHeader !== `Bearer ${process.env.SYNC_SECRET}`) {
+    //   return json({ error: "Unauthorized" }, { status: 401 });
+    // }
+
+    /* ----------------------------------------------------
+     * 2. SHOP DOMAIN
+     * ---------------------------------------------------- */
+    const shop = "project-shibuya.myshopify.com";
+
+    /* ----------------------------------------------------
+     * 3. LOAD OFFLINE OAUTH SESSION
+     * Session ID format is ALWAYS: offline_<shop>
+     * ---------------------------------------------------- */
+    const offlineSessionId = `offline_${shop}`;
+    const session = await sessionStorage.loadSession(offlineSessionId);
+
     if (!session) {
       return json({ error: "Offline session missing" }, { status: 401 });
     }
@@ -350,7 +368,16 @@ export const action = async ({ request }) => {
       );
     }
 
-    /* ---------------- SUCCESS LOG ---------------- */
+    /* =====================================================
+     * ✅ SUCCESS LOG
+     * ===================================================== */
+    console.log("🧾 ABOUT TO INSERT LOG", {
+  shop,
+  sku,
+  productId,
+  actionType,
+});
+
     await insertLog({
       shop,
       netsuite_user,
@@ -374,6 +401,16 @@ export const action = async ({ request }) => {
     });
   } catch (error) {
     console.error("❌ Sync failed:", error);
+
+    /* =====================================================
+     * ❌ FAILURE LOG
+     * ===================================================== */
+    console.log("🧾 ABOUT TO INSERT LOG", {
+  shop,
+  sku,
+  productId,
+  actionType,
+});
 
     await insertLog({
       shop,
