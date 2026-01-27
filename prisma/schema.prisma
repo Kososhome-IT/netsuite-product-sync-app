@@ -33,17 +33,22 @@ model Session {
 }
 
 model DashboardLog {
-  id            Int      @id @default(autoincrement())
-  shop          String?
-  action        String?
-  status        String?
-  message       String?
-  netsuiteUser  String?   @map("netsuite_user")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @map("updated_at")
+  id               Int      @id @default(autoincrement())
+  shop             String?
+  netsuiteUser     String?  @map("netsuite_user")
+  productSku       String?  @map("product_sku")
+  shopifyProductId String?  @map("shopify_product_id")
+  productName      String?  @map("product_name")
+  action           String?
+  status           String?
+  errorStage       String?  @map("error_stage")
+  errorMessage     String?  @map("error_message")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
 
   @@map("dashboard_logs")
 }
+
 
 model ProductSyncLog {
   id               Int      @id @default(autoincrement())
@@ -56,4 +61,27 @@ model ProductSyncLog {
   payload          Json?
   error            Json?
   createdAt        DateTime @default(now())
+}
+
+enum InventoryLogStatus {
+  SUCCESS
+  FAILED
+}
+
+model InventoryLog {
+  id              String   @id @default(uuid())
+  sku             String
+  warehouse       String
+  locationId      String
+  quantity        Int
+  status          InventoryLogStatus
+  errorMessage    String?
+  source          String
+  requestPayload  Json?
+  responsePayload Json?
+  createdAt       DateTime @default(now())
+
+  @@index([sku])
+  @@index([status])
+  @@index([createdAt])
 }

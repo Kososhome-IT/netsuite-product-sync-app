@@ -4,6 +4,7 @@ import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
 import { insertLog } from "../utils/insert-dashboard-log";
 
+
 /* =====================================================
  * INVENTORY VERIFICATION (API VERSION SAFE)
  * ===================================================== */
@@ -37,7 +38,7 @@ const verifyInventory = async ({ admin, inventoryItemId, stage }) => {
 };
 
 export const action = async ({ request }) => {
-  const shop = "dummy-ranjit.myshopify.com";
+  const shop = process.env.SHOP;
 
   let productId;
   let variantId;
@@ -59,7 +60,7 @@ export const action = async ({ request }) => {
     /* ----------------------------------------------------
      * 2. SHOP DOMAIN
      * ---------------------------------------------------- */
-    const shop = "project-shibuya.myshopify.com";
+    const shop = process.env.SHOP;
 
     /* ----------------------------------------------------
      * 3. LOAD OFFLINE OAUTH SESSION
