@@ -1,2 +1,0 @@
--- AlterTable
-ALTER TABLE "Session" ALTER COLUMN "expires" SET DATA TYPE TIMESTAMP(3);

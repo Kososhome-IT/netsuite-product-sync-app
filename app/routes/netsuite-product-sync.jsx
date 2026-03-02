@@ -4,38 +4,49 @@ import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
 import { insertLog } from "../utils/insert-dashboard-log";
 
+import {
+  resolveFromNetSuite,
+  resolveFromShopifyCategoryId,
+  mergeMetafields,
+  GLOBAL_METAFIELDS_CONFIG,
+} from "../services/category-resolver";
 
 /* =====================================================
- * INVENTORY VERIFICATION (API VERSION SAFE)
+ * METAOBJECT LIST RESOLVER
  * ===================================================== */
-const verifyInventory = async ({ admin, inventoryItemId, stage }) => {
+async function resolveMetaobjectIdsByDisplayValues({
+  admin,
+  metaobjectType,
+  displayFieldKey,
+  displayValues,
+}) {
   const res = await admin.request(
     `
-    query ($id: ID!) {
-      inventoryItem(id: $id) {
-        id
-        inventoryLevels(first: 10) {
-          edges {
-            node {
-              location {
-                name
-              }
-              quantities(names: ["available"]) {
-                name
-                quantity
-              }
-            }
-          }
+    query ($type: String!) {
+      metaobjects(type: $type, first: 250) {
+        nodes {
+          id
+          fields { key value }
         }
       }
     }
     `,
-    { variables: { id: inventoryItemId } }
+    { variables: { type: metaobjectType } }
   );
 
-  console.log(`📦 INVENTORY VERIFY [${stage}]`, JSON.stringify(res, null, 2));
-  return res;
-};
+  const nodes = res?.data?.metaobjects?.nodes || [];
+  const valueSet = new Set(displayValues);
+  const resolvedIds = [];
+
+  for (const node of nodes) {
+    const field = node.fields.find(
+      (f) => f.key === displayFieldKey && valueSet.has(f.value)
+    );
+    if (field) resolvedIds.push(node.id);
+  }
+
+  return resolvedIds;
+}
 
 export const action = async ({ request }) => {
   const shop = process.env.SHOP;
@@ -49,23 +60,7 @@ export const action = async ({ request }) => {
   let netsuite_user = "system";
 
   try {
-    /* ----------------------------------------------------
-     * 1. PROTECT ENDPOINT (MANDATORY)
-     * ---------------------------------------------------- */
-    // const authHeader = request.headers.get("authorization");
-    // if (authHeader !== `Bearer ${process.env.SYNC_SECRET}`) {
-    //   return json({ error: "Unauthorized" }, { status: 401 });
-    // }
-
-    /* ----------------------------------------------------
-     * 2. SHOP DOMAIN
-     * ---------------------------------------------------- */
-    const shop = process.env.SHOP;
-
-    /* ----------------------------------------------------
-     * 3. LOAD OFFLINE OAUTH SESSION
-     * Session ID format is ALWAYS: offline_<shop>
-     * ---------------------------------------------------- */
+    /* ================= SESSION ================= */
     const offlineSessionId = `offline_${shop}`;
     const session = await sessionStorage.loadSession(offlineSessionId);
 
@@ -79,31 +74,24 @@ export const action = async ({ request }) => {
       accessToken: session.accessToken,
     });
 
-    /* ---------------- LOCATIONS ---------------- */
+    /* ================= LOCATIONS ================= */
     const locationRes = await admin.request(`
       query {
         locations(first: 10) {
-          edges {
-            node {
-              id
-              name
-            }
-          }
+          edges { node { id name } }
         }
       }
     `);
-
-    if (!locationRes?.data?.locations?.edges) {
-      throw new Error("Failed to fetch Shopify locations");
-    }
 
     const locationMap = {};
     for (const edge of locationRes.data.locations.edges) {
       locationMap[edge.node.name.toLowerCase()] = edge.node.id;
     }
 
-    /* ---------------- PAYLOAD ---------------- */
+    /* ================= PAYLOAD ================= */
     const payload = await request.json();
+    const { netsuite_category } = payload;
+
     ({ title, sku, netsuite_user = "system" } = payload);
 
     const {
@@ -122,7 +110,15 @@ export const action = async ({ request }) => {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
 
-    /* ---------------- SEARCH BY SKU ---------------- */
+    /* ================= CATEGORY ================= */
+    let createCategoryConfig = null;
+    let categoryMetafields = [];
+
+    if (netsuite_category) {
+      createCategoryConfig = resolveFromNetSuite(netsuite_category);
+    }
+
+    /* ================= SEARCH SKU ================= */
     const searchRes = await admin.request(
       `
       query ($query: String!) {
@@ -143,7 +139,7 @@ export const action = async ({ request }) => {
     const existingVariant =
       searchRes.data?.productVariants?.edges?.[0]?.node;
 
-    /* ---------------- CREATE PRODUCT ---------------- */
+    /* ================= CREATE ================= */
     if (!existingVariant) {
       actionType = "created";
 
@@ -156,11 +152,24 @@ export const action = async ({ request }) => {
           }
         }
         `,
-        { variables: { input: { title, vendor, descriptionHtml } } }
+        {
+          variables: {
+            input: {
+              title,
+              vendor,
+              descriptionHtml,
+              ...(createCategoryConfig && {
+                category: createCategoryConfig.taxonomyId,
+              }),
+            },
+          },
+        }
       );
 
       if (productRes.data.productCreate.userErrors.length) {
-        throw new Error("Product creation failed");
+        throw new Error(
+          JSON.stringify(productRes.data.productCreate.userErrors)
+        );
       }
 
       productId = productRes.data.productCreate.product.id;
@@ -171,10 +180,7 @@ export const action = async ({ request }) => {
           product(id: $id) {
             variants(first: 1) {
               edges {
-                node {
-                  id
-                  inventoryItem { id }
-                }
+                node { id inventoryItem { id } }
               }
             }
           }
@@ -188,13 +194,16 @@ export const action = async ({ request }) => {
 
       variantId = node.id;
       inventoryItemId = node.inventoryItem.id;
+
+      categoryMetafields =
+        createCategoryConfig?.metafields || [];
     } else {
       productId = existingVariant.product.id;
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
     }
 
-    /* ---------------- UPDATE PRODUCT ---------------- */
+    /* ================= UPDATE PRODUCT ================= */
     await admin.request(
       `
       mutation productUpdate($input: ProductInput!) {
@@ -205,149 +214,113 @@ export const action = async ({ request }) => {
       `,
       {
         variables: {
-          input: { id: productId, title, descriptionHtml, vendor },
-        },
-      }
-    );
-
-    /* ---------------- UPDATE VARIANT ---------------- */
-    await admin.request(
-      `
-      mutation ProductVariantsBulkUpdate(
-        $productId: ID!,
-        $variants: [ProductVariantsBulkInput!]!
-      ) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-          userErrors { field message }
-        }
-      }
-      `,
-      {
-        variables: {
-          productId,
-          variants: [
-            {
-              id: variantId,
-              price: String(price),
-              inventoryPolicy: "DENY",
-              inventoryManagement: "SHOPIFY",
-              barcode,
-            },
-          ],
-        },
-      }
-    );
-
-    /* ---------------- UPDATE INVENTORY ITEM ---------------- */
-    await admin.request(
-      `
-      mutation InventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-        inventoryItemUpdate(id: $id, input: $input) {
-          userErrors { field message }
-        }
-      }
-      `,
-      {
-        variables: {
-          id: inventoryItemId,
           input: {
-            sku,
-            tracked: true,
-            harmonizedSystemCode: hs_code,
-            countryCodeOfOrigin: country_of_origin?.toUpperCase(),
-            ...(Number.isFinite(Number(weight)) && {
-              measurement: {
-                weight: {
-                  value: Number(weight),
-                  unit: "POUNDS",
-                },
-              },
+            id: productId,
+            title,
+            descriptionHtml,
+            vendor,
+            ...(createCategoryConfig && {
+              category: createCategoryConfig.taxonomyId,
             }),
           },
         },
       }
     );
 
-    /* ---------------- VERIFY BEFORE INVENTORY ---------------- */
-    await verifyInventory({ admin, inventoryItemId, stage: "BEFORE" });
-
-    /* ---------------- INVENTORY ACTIVATE + ADJUST ---------------- */
-    if (actionType === "created") {
-      await new Promise((r) => setTimeout(r, 500));
-
-      for (const locationId of Object.values(locationMap)) {
-        await admin.request(
-          `
-          mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!) {
-            inventoryActivate(
-              inventoryItemId: $inventoryItemId
-              locationId: $locationId
-            ) {
-              inventoryLevel { id }
-              userErrors { field message }
-            }
+    /* ================= CATEGORY RESOLVE UPDATE ================= */
+    if (actionType === "updated") {
+      const categoryRes = await admin.request(
+        `
+        query ($id: ID!) {
+          product(id: $id) {
+            category { id }
           }
-          `,
-          { variables: { inventoryItemId, locationId } }
-        );
-      }
-
-      const changes = [];
-      for (const [loc, qty] of Object.entries(quantity_by_location)) {
-        const locationId = locationMap[loc.toLowerCase()];
-        if (!locationId || !Number.isFinite(Number(qty))) continue;
-
-        changes.push({
-          inventoryItemId,
-          locationId,
-          delta: Number(qty), // must be POSITIVE for initial stock
-        });
-      }
-
-      if (changes.length) {
-        const adjustRes = await admin.request(
-          `
-          mutation inventoryAdjustQuantities(
-            $input: InventoryAdjustQuantitiesInput!
-          ) {
-            inventoryAdjustQuantities(input: $input) {
-              userErrors { field message }
-            }
-          }
-          `,
-          {
-            variables: {
-              input: {
-                name: "available",
-                reason: "correction",
-                changes,
-              },
-            },
-          }
-        );
-
-        if (adjustRes.data.inventoryAdjustQuantities.userErrors.length) {
-          throw new Error(
-            JSON.stringify(
-              adjustRes.data.inventoryAdjustQuantities.userErrors
-            )
-          );
         }
-      }
+        `,
+        { variables: { id: productId } }
+      );
+
+      const updateCategoryConfig =
+        resolveFromShopifyCategoryId(
+          categoryRes.data.product.category?.id
+        );
+
+      categoryMetafields =
+        updateCategoryConfig?.metafields || [];
     }
 
-    /* ---------------- VERIFY AFTER INVENTORY ---------------- */
-    const verifyAfter = await verifyInventory({
-      admin,
-      inventoryItemId,
-      stage: "AFTER",
-    });
+    /* =====================================================
+       CONTROLLED GLOBAL + CATEGORY METAFIELDS
+    ===================================================== */
 
-    /* ---------------- METAFIELDS (UNCHANGED) ---------------- */
+    // Build allowed keys (GLOBAL + CATEGORY)
+    const globalAllowedKeys = new Set(
+      (GLOBAL_METAFIELDS_CONFIG || []).map(
+        (mf) => `${mf.namespace}.${mf.key}`
+      )
+    );
+
+    const categoryAllowedKeys = new Set(
+      categoryMetafields.map(
+        (mf) => `${mf.namespace || "custom"}.${mf.key}`
+      )
+    );
+
+    const allowedKeys = new Set([
+      ...globalAllowedKeys,
+      ...categoryAllowedKeys,
+    ]);
+
+    const payloadMetaobjectFields = metafields.filter(
+      (mf) => mf.type === "metaobject_reference"
+    );
+
+    const payloadNormalFields = metafields.filter(
+      (mf) => mf.type !== "metaobject_reference"
+    );
+
+    const filteredNormalFields = payloadNormalFields.filter(
+      (mf) =>
+        allowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`) &&
+        mf.value !== undefined &&
+        mf.value !== null &&
+        mf.value !== ""
+    );
+
+    let resolvedMetaobjectFields = [];
+
+    for (const mf of payloadMetaobjectFields) {
+      if (!allowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
+        continue;
+
+      const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
+        admin,
+        metaobjectType: mf.metaobject_type,
+        displayFieldKey: mf.display_field_key,
+        displayValues: mf.value,
+      });
+
+      if (!resolvedIds.length) continue;
+
+      resolvedMetaobjectFields.push({
+        namespace: mf.namespace || "custom",
+        key: mf.key,
+        type: mf.type,
+        value: JSON.stringify(resolvedIds),
+      });
+    }
+
+    const finalMetafields = [
+      ...filteredNormalFields,
+      ...resolvedMetaobjectFields,
+    ];
+
     const CHUNK_SIZE = 25;
-    for (let i = 0; i < metafields.length; i += CHUNK_SIZE) {
-      const chunk = metafields.slice(i, i + CHUNK_SIZE);
-      await admin.request(
+
+    for (let i = 0; i < finalMetafields.length; i += CHUNK_SIZE) {
+      const chunk = finalMetafields.slice(i, i + CHUNK_SIZE);
+
+      const response = await admin.request(
         `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
@@ -362,23 +335,21 @@ export const action = async ({ request }) => {
               namespace: mf.namespace || "custom",
               key: mf.key,
               type: mf.type,
-              value: String(mf.value),
+              value: mf.value,
             })),
           },
         }
       );
+
+      const errors =
+        response?.data?.metafieldsSet?.userErrors;
+
+      if (errors?.length) {
+        throw new Error(JSON.stringify(errors));
+      }
     }
 
-    /* =====================================================
-     * ✅ SUCCESS LOG
-     * ===================================================== */
-    console.log("🧾 ABOUT TO INSERT LOG", {
-  shop,
-  sku,
-  productId,
-  actionType,
-});
-
+    /* ================= SUCCESS ================= */
     await insertLog({
       shop,
       netsuite_user,
@@ -387,32 +358,11 @@ export const action = async ({ request }) => {
       product_name: title,
       action: actionType,
       status: "success",
-      inventory_debug: JSON.stringify(
-        verifyAfter?.data?.inventoryItem?.inventoryLevels?.edges || []
-      ),
     });
 
-    return json({
-      success: true,
-      action: actionType,
-      productId,
-      variantId,
-      inventoryItemId,
-      sku,
-    });
+    return json({ success: true, action: actionType });
+
   } catch (error) {
-    console.error("❌ Sync failed:", error);
-
-    /* =====================================================
-     * ❌ FAILURE LOG
-     * ===================================================== */
-    console.log("🧾 ABOUT TO INSERT LOG", {
-  shop,
-  sku,
-  productId,
-  actionType,
-});
-
     await insertLog({
       shop,
       netsuite_user,
@@ -424,6 +374,9 @@ export const action = async ({ request }) => {
       error_message: error.message,
     });
 
-    return json({ error: "Failed", details: error.message }, { status: 500 });
+    return json(
+      { error: "Failed", details: error.message },
+      { status: 500 }
+    );
   }
 };
