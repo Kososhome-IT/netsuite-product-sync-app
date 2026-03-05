@@ -202,7 +202,55 @@ export const action = async ({ request }) => {
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
     }
+/* ================= UPDATE SKU / BARCODE / HS CODE ================= */
 
+if (variantId && productId) {
+  const variantUpdateRes = await admin.request(
+    `
+    mutation productVariantsBulkUpdate(
+      $productId: ID!,
+      $variants: [ProductVariantsBulkInput!]!
+    ) {
+      productVariantsBulkUpdate(
+        productId: $productId,
+        variants: $variants
+      ) {
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    `,
+    {
+      variables: {
+        productId: productId,
+        variants: [
+          {
+            id: variantId,
+
+            ...(barcode && { barcode }),
+
+            inventoryItem: {
+              ...(sku && { sku }),
+              ...(hs_code && { harmonizedSystemCode: hs_code }),
+              ...(country_of_origin && {
+                countryCodeOfOrigin: country_of_origin,
+              }),
+            },
+          },
+        ],
+      },
+    }
+  );
+
+  const errors =
+    variantUpdateRes?.data?.productVariantsBulkUpdate?.userErrors;
+
+  if (errors?.length) {
+    throw new Error(JSON.stringify(errors));
+  }
+}
     /* ================= UPDATE PRODUCT ================= */
     await admin.request(
       `
