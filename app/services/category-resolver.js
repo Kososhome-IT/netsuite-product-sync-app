@@ -2,6 +2,7 @@ import {
   NETSUITE_CATEGORY_MAP,
   CATEGORY_CONFIG,
   GLOBAL_METAFIELDS_CONFIG,
+  VARIANT_METAFIELDS_CONFIG,
 } from "../config/category-mapping";
 
 /* =====================================================
@@ -44,5 +45,6 @@ export function mergeMetafields(existing, categoryBased) {
   return Array.from(map.values());
 }
 
+export { VARIANT_METAFIELDS_CONFIG };
 export { GLOBAL_METAFIELDS_CONFIG };
 
