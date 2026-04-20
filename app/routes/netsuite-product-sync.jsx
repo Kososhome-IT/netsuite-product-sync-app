@@ -3,6 +3,7 @@ import { createAdminApiClient } from "@shopify/admin-api-client";
 import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
 import { insertLog } from "../utils/insert-dashboard-log";
+import { COUNTRY_MAP } from "../config/countries";
 
 import {
   resolveFromNetSuite,
@@ -240,9 +241,7 @@ if (variantId && productId) {
             inventoryItem: {
               ...(sku && { sku }),
               ...(hs_code && { harmonizedSystemCode: hs_code }),
-              ...(country_of_origin && {
-                countryCodeOfOrigin: country_of_origin,
-              }),
+              ...(country_of_origin && {countryCodeOfOrigin:COUNTRY_MAP[country_of_origin] || country_of_origin,}),
             },
           },
         ],
