@@ -9,6 +9,7 @@ import {
   resolveFromShopifyCategoryId,
   mergeMetafields,
   GLOBAL_METAFIELDS_CONFIG,
+  VARIANT_METAFIELDS_CONFIG
 } from "../services/category-resolver";
 
 /* =====================================================
@@ -58,6 +59,7 @@ export const action = async ({ request }) => {
   let sku;
   let title;
   let netsuite_user = "system";
+  console.log("🔍 VARIANT ID 1:", variantId);
 
   try {
     /* ================= SESSION ================= */
@@ -90,6 +92,8 @@ export const action = async ({ request }) => {
 
     /* ================= PAYLOAD ================= */
     const payload = await request.json();
+console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
+
     const { netsuite_category } = payload;
 
     ({ title, sku, netsuite_user = "system" } = payload);
@@ -103,9 +107,10 @@ export const action = async ({ request }) => {
       country_of_origin,
       weight,
       metafields = [],
+      variant_metafields = [],
       quantity_by_location = {},
     } = payload;
-
+console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
     if (!title || !sku) {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
@@ -194,13 +199,14 @@ export const action = async ({ request }) => {
 
       variantId = node.id;
       inventoryItemId = node.inventoryItem.id;
-
+console.log("🔍 VARIANT ID 2:", variantId);
       categoryMetafields =
         createCategoryConfig?.metafields || [];
     } else {
       productId = existingVariant.product.id;
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
+      console.log("🔍 VARIANT ID 3:", variantId);
     }
 /* ================= UPDATE SKU / BARCODE / HS CODE ================= */
 
@@ -301,24 +307,34 @@ if (variantId && productId) {
        CONTROLLED GLOBAL + CATEGORY METAFIELDS
     ===================================================== */
 
-    // Build allowed keys (GLOBAL + CATEGORY)
-    const globalAllowedKeys = new Set(
-      (GLOBAL_METAFIELDS_CONFIG || []).map(
-        (mf) => `${mf.namespace}.${mf.key}`
-      )
-    );
+/* ================= PRODUCT KEYS ================= */
+const globalProductKeys = new Set(
+  (GLOBAL_METAFIELDS_CONFIG || [])
+    .filter(mf => mf.owner !== "variant")
+    .map(mf => `${mf.namespace}.${mf.key}`)
+);
 
-    const categoryAllowedKeys = new Set(
-      categoryMetafields.map(
-        (mf) => `${mf.namespace || "custom"}.${mf.key}`
-      )
-    );
+const categoryProductKeys = new Set(
+  (categoryMetafields || [])
+    .filter(mf => mf.owner !== "variant")
+    .map(mf => `${mf.namespace || "custom"}.${mf.key}`)
+);
 
-    const allowedKeys = new Set([
-      ...globalAllowedKeys,
-      ...categoryAllowedKeys,
-    ]);
+const productAllowedKeys = new Set([
+  ...globalProductKeys,
+  ...categoryProductKeys,
+]);
 
+/* ================= VARIANT KEYS ================= */
+const globalVariantKeys = new Set(
+  (VARIANT_METAFIELDS_CONFIG || [])
+    .map(mf => `${mf.namespace}.${mf.key}`)
+);
+
+const variantAllowedKeys = new Set([
+  ...globalVariantKeys,
+]);
+console.log("🔍 VARIANT ALLOWED KEYS:", [...variantAllowedKeys]);
     const payloadMetaobjectFields = metafields.filter(
       (mf) => mf.type === "metaobject_reference"
     );
@@ -328,18 +344,18 @@ if (variantId && productId) {
     );
 
     const filteredNormalFields = payloadNormalFields.filter(
-      (mf) =>
-        allowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`) &&
-        mf.value !== undefined &&
-        mf.value !== null &&
-        mf.value !== ""
-    );
+  (mf) =>
+    productAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`) &&
+    mf.value !== undefined &&
+    mf.value !== null &&
+    mf.value !== ""
+);
 
     let resolvedMetaobjectFields = [];
 
     for (const mf of payloadMetaobjectFields) {
-      if (!allowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
-        continue;
+      if (!productAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
+  continue;
 
       const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
         admin,
@@ -380,6 +396,7 @@ if (variantId && productId) {
           variables: {
             metafields: chunk.map((mf) => ({
               ownerId: productId,
+              //  ownerId: variantId,
               namespace: mf.namespace || "custom",
               key: mf.key,
               type: mf.type,
@@ -396,7 +413,103 @@ if (variantId && productId) {
         throw new Error(JSON.stringify(errors));
       }
     }
+/* ================= VARIANT METAFIELDS ================= */
 
+if (variantId && variant_metafields.length) {
+
+  const variant_payloadMetaobjectFields = variant_metafields.filter(
+    (mf) => mf.type === "metaobject_reference"
+  );
+
+  const variant_payloadNormalFields = variant_metafields.filter(
+    (mf) => mf.type !== "metaobject_reference"
+  );
+
+  const variant_filteredNormalFields = variant_payloadNormalFields.filter(
+  (mf) => {
+    const key = `${mf.namespace || "custom"}.${mf.key}`;
+    const isAllowed = variantAllowedKeys.has(key);
+
+    console.log("🔍 CHECK VARIANT KEY:", {
+      key,
+      isAllowed,
+      value: mf.value
+    });
+
+    return (
+      isAllowed &&
+      mf.value !== undefined &&
+      mf.value !== null &&
+      mf.value !== ""
+    );
+  }
+);
+
+  let variantResolvedMetaobjectFields = [];
+
+  for (const mf of variant_payloadMetaobjectFields) {
+    if (!variantAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
+      continue;
+
+    const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
+      admin,
+      metaobjectType: mf.metaobject_type,
+      displayFieldKey: mf.display_field_key,
+      displayValues: mf.value,
+    });
+
+    if (!resolvedIds.length) continue;
+
+    variantResolvedMetaobjectFields.push({
+      namespace: mf.namespace || "custom",
+      key: mf.key,
+      type: mf.type,
+      value: JSON.stringify(resolvedIds),
+    });
+  }
+
+  const finalVariantMetafields = [
+    ...variant_filteredNormalFields,
+    ...variantResolvedMetaobjectFields,
+  ];
+console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
+  const CHUNK_SIZE = 25;
+
+  for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
+    const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
+console.log("🔍 SENDING VARIANT CHUNK:", chunk);
+    const response = await admin.request(
+      `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          userErrors { field message }
+        }
+      }
+      `,
+      {
+        variables: {
+          metafields: chunk.map((mf) => ({
+            ownerId: variantId, // ✅ correct
+            namespace: mf.namespace || "custom",
+            key: mf.key,
+            type: mf.type,
+            value: mf.value,
+          })),
+        },
+      }
+    );
+
+    const errors =
+      response?.data?.metafieldsSet?.userErrors;
+      console.log("🔍 SHOPIFY VARIANT RESPONSE:", JSON.stringify(response, null, 2));
+
+   if (errors?.length) {
+  console.error("❌ VARIANT METAFIELD ERROR:", errors);
+  console.error("❌ FAILED CHUNK:", chunk);
+  throw new Error(JSON.stringify(errors));
+}
+  }
+}
     /* ================= SUCCESS ================= */
     await insertLog({
       shop,

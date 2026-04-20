@@ -103,6 +103,229 @@ export const GLOBAL_METAFIELDS_CONFIG = [
   },
 ];
 
+export const VARIANT_METAFIELDS_CONFIG = [
+
+  /* ================= BASIC ================= */
+  {
+    namespace: "custom",
+    key: "show_on_website",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "internal_id",
+    type: "number_integer",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "division_status",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "best_sellers",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "imap",
+    type: "number_decimal",
+    owner: "variant",
+  },
+
+  /* ================= DIMENSIONS ================= */
+  {
+    namespace: "custom",
+    key: "width",
+    type: "dimension",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "depth",
+    type: "dimension",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "height",
+    type: "dimension",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "item_weight",
+    type: "weight",
+    owner: "variant",
+  },
+
+  /* ================= INVENTORY ================= */
+  {
+    namespace: "custom",
+    key: "increment_qty",
+    type: "number_integer",
+    owner: "variant",
+  },
+
+  /* ================= PACKAGED ================= */
+  {
+    namespace: "custom",
+    key: "packaged_width",
+    type: "dimension",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "packaged_depth",
+    type: "dimension",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "packaged_height",
+    type: "dimension",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "packaged_weight",
+    type: "weight",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "packaged_cubic_feet",
+    type: "number_decimal",
+    owner: "variant",
+  },
+
+  /* ================= BOXES ================= */
+  ...[1,2,3,4,5].flatMap((i) => ([
+    {
+      namespace: "custom",
+      key: `box_${i}_dimensions`,
+      type: "single_line_text_field",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_${i}_weight`,
+      type: "weight",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_${i}_cbf`,
+      type: "number_decimal",
+      owner: "variant",
+    },
+  ])),
+
+  /* ================= SHIPPING ================= */
+  {
+    namespace: "custom",
+    key: "knock_down",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "ship_type",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+
+  /* ================= ATTRIBUTES ================= */
+  {
+    namespace: "custom",
+    key: "primary_material_finish_code",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "materials",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "size",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "color_family",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+
+  /* ================= FLAGS ================= */
+  {
+    namespace: "custom",
+    key: "first_look",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "new",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "fsc_certified_product",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "certification",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
+
+  /* ================= MEDIA ================= */
+  {
+    namespace: "custom",
+    key: "ai_file_link",
+    type: "url",
+    owner: "variant",
+  },
+
+  /* ================= INVENTORY BY LOCATION ================= */
+  {
+    namespace: "custom",
+    key: "nc_instock",
+    type: "number_integer",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "ca_instock",
+    type: "number_integer",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "ca_eta",
+    type: "date",
+    owner: "variant",
+  },
+  {
+    namespace: "custom",
+    key: "nc_eta",
+    type: "date",
+    owner: "variant",
+  },
+];
+
 export const CATEGORY_CONFIG = {
 
   ARTWORK: {
