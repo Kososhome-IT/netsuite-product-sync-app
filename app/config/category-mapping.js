@@ -204,27 +204,96 @@ export const VARIANT_METAFIELDS_CONFIG = [
   },
 
   /* ================= BOXES ================= */
-  ...[1,2,3,4,5].flatMap((i) => ([
-    {
+ {
       namespace: "custom",
-      key: `box_${i}_dimensions`,
+      key: `box_1_dimensions`,
       type: "single_line_text_field",
       owner: "variant",
     },
     {
       namespace: "custom",
-      key: `box_${i}_weight`,
+      key: `box_1_weight`,
       type: "weight",
       owner: "variant",
     },
     {
       namespace: "custom",
-      key: `box_${i}_cbf`,
+      key: `box_1_cbf`,
       type: "number_decimal",
       owner: "variant",
     },
-  ])),
-
+ {
+      namespace: "custom",
+      key: `box_2_dimensions`,
+      type: "single_line_text_field",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_2_weight`,
+      type: "weight",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_2_cbf`,
+      type: "number_decimal",
+      owner: "variant",
+    },
+     {
+      namespace: "custom",
+      key: `box_3_dimensions`,
+      type: "single_line_text_field",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_3_weight`,
+      type: "weight",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_3_cbf`,
+      type: "number_decimal",
+      owner: "variant",
+    },
+     {
+      namespace: "custom",
+      key: `box_4_dimensions`,
+      type: "single_line_text_field",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_4_weight`,
+      type: "weight",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_4_cbf`,
+      type: "number_decimal",
+      owner: "variant",
+    },
+     {
+      namespace: "custom",
+      key: `box_5_dimensions`,
+      type: "single_line_text_field",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_5_weight`,
+      type: "weight",
+      owner: "variant",
+    },
+    {
+      namespace: "custom",
+      key: `box_5_cbf`,
+      type: "number_decimal",
+      owner: "variant",
+    },
   /* ================= SHIPPING ================= */
   {
     namespace: "custom",
