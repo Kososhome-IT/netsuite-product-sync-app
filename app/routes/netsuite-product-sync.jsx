@@ -50,7 +50,78 @@ async function resolveMetaobjectIdsByDisplayValues({
   return resolvedIds;
 }
 
+function isValidMetafieldValue(value) {
+  if (value === undefined || value === null) return false;
 
+  // string
+  if (typeof value === "string") {
+    return value.trim() !== "";
+  }
+
+  // array
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  // object
+  if (typeof value === "object") {
+    return Object.keys(value).length > 0;
+  }
+
+  return true;
+}
+
+function parseInchesAndPounds(rawValue) {
+  if (!rawValue) return null;
+
+  const str = String(rawValue).toLowerCase().trim();
+
+  // extract number
+  const numberMatch = str.match(/[\d.]+/);
+  const value = numberMatch ? Number(numberMatch[0]) : null;
+
+  if (!value) return null;
+
+  // detect unit
+  let unit = null;
+
+  if (str.includes("in") || str.includes("inch")) {
+    unit = "in";
+  } else if (str.includes("lb") || str.includes("pound")) {
+    unit = "lb";
+  }
+
+  return {
+    value,
+    unit,
+  };
+}
+
+function transformMetafieldValue(mf) {
+  const raw = mf.value;
+
+  const parsed = parseInchesAndPounds(raw);
+
+  // DIMENSION
+  if (mf.type === "dimension") {
+    return JSON.stringify({
+      value: parsed?.value ?? Number(raw),
+      unit: "in",
+    });
+  }
+
+  // WEIGHT
+  if (mf.type === "weight") {
+    return JSON.stringify({
+      value: parsed?.value ?? Number(raw),
+      unit: "lb",
+    });
+  }
+
+  // default
+  if (typeof raw === "string") return raw;
+  return JSON.stringify(raw);
+}
 
 export const action = async ({ request }) => {
   const shop = process.env.SHOP;
@@ -518,26 +589,23 @@ if (variantId && variant_metafields.length) {
     (mf) => mf.type !== "metaobject_reference"
   );
 
-  const variant_filteredNormalFields = variant_payloadNormalFields.filter(
+const variant_filteredNormalFields = variant_payloadNormalFields.filter(
   (mf) => {
     const key = `${mf.namespace || "custom"}.${mf.key}`;
     const isAllowed = variantAllowedKeys.has(key);
 
-    console.log("🔍 CHECK VARIANT KEY:", {
+    const isValid = isValidMetafieldValue(mf.value);
+
+    console.log("🔍 CHECK VARIANT MF:", {
       key,
+      value: mf.value,
       isAllowed,
-      value: mf.value
+      isValid,
     });
 
-    return (
-      isAllowed &&
-      mf.value !== undefined &&
-      mf.value !== null &&
-      mf.value !== ""
-    );
+    return isAllowed && isValid;
   }
 );
-
   let variantResolvedMetaobjectFields = [];
 
   for (const mf of variant_payloadMetaobjectFields) {
@@ -586,7 +654,7 @@ console.log("🔍 SENDING VARIANT CHUNK:", chunk);
             namespace: mf.namespace || "custom",
             key: mf.key,
             type: mf.type,
-            value: mf.value,
+            value: transformMetafieldValue(mf),
           })),
         },
       }
