@@ -50,6 +50,8 @@ async function resolveMetaobjectIdsByDisplayValues({
   return resolvedIds;
 }
 
+
+
 export const action = async ({ request }) => {
   const shop = process.env.SHOP;
 
@@ -73,7 +75,7 @@ export const action = async ({ request }) => {
 
     const admin = createAdminApiClient({
       storeDomain: shop,
-      apiVersion: ApiVersion.April25,
+      apiVersion: "2026-04",
       accessToken: session.accessToken,
     });
 
@@ -98,6 +100,7 @@ console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
     const { netsuite_category } = payload;
 
     ({ title, sku, netsuite_user = "system" } = payload);
+    const { color, size } = payload;
 
     const {
       descriptionHtml = "",
@@ -150,27 +153,53 @@ console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
       actionType = "created";
 
       const productRes = await admin.request(
-        `
-        mutation productCreate($input: ProductInput!) {
-          productCreate(input: $input) {
-            product { id }
-            userErrors { field message }
-          }
+  `
+  mutation productCreate($product: ProductCreateInput!) {
+    productCreate(product: $product) {
+      product {
+        id
+        options {
+          id
+          name
+          optionValues { name }
         }
-        `,
-        {
-          variables: {
-            input: {
-              title,
-              vendor,
-              descriptionHtml,
-              ...(createCategoryConfig && {
-                category: createCategoryConfig.taxonomyId,
-              }),
-            },
-          },
-        }
-      );
+      }
+      userErrors { field message }
+    }
+  }
+  `,
+  {
+    variables: {
+      product: {
+        title,
+        vendor,
+        descriptionHtml,
+
+        ...(createCategoryConfig && {
+          category: createCategoryConfig.taxonomyId,
+        }),
+
+        // 🔥 CREATE OPTIONS HERE
+        productOptions: [
+          ...(payload.color && payload.color.trim()
+            ? [{
+                name: "Color",
+                values: [{ name: payload.color.trim() }],
+              }]
+            : []),
+
+          ...(payload.size && payload.size.trim()
+            ? [{
+                name: "Size",
+                values: [{ name: payload.size.trim() }],
+              }]
+            : []),
+        ],
+      },
+    },
+  }
+);
+
 
       if (productRes.data.productCreate.userErrors.length) {
         throw new Error(
@@ -199,6 +228,71 @@ console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
         productQueryRes.data.product.variants.edges[0].node;
 
       variantId = node.id;
+const productSetRes = await admin.request(
+  `
+  mutation productSet($input: ProductSetInput!) {
+    productSet(input: $input) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+  `,
+  {
+    variables: {
+      input: {
+        id: productId,
+
+        // 🔥 ADD THIS (MANDATORY)
+        productOptions: [
+          ...(color && color.trim()
+            ? [{
+                name: "Color",
+                values: [{ name: color.trim() }],
+              }]
+            : []),
+
+          ...(size && size.trim()
+            ? [{
+                name: "Size",
+                values: [{ name: size.trim() }],
+              }]
+            : []),
+        ],
+
+        // 🔥 KEEP THIS
+        variants: [
+          {
+            id: variantId,
+
+            optionValues: [
+              ...(color && color.trim()
+                ? [{
+                    name: color.trim(),
+                    optionName: "Color",
+                  }]
+                : []),
+
+              ...(size && size.trim()
+                ? [{
+                    name: size.trim(),
+                    optionName: "Size",
+                  }]
+                : []),
+            ],
+          },
+        ],
+      },
+    },
+  }
+);
+const setErrors = productSetRes?.data?.productSet?.userErrors;
+
+if (setErrors?.length) {
+  throw new Error(JSON.stringify(setErrors));
+}
+
       inventoryItemId = node.inventoryItem.id;
 console.log("🔍 VARIANT ID 2:", variantId);
       categoryMetafields =
