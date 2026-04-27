@@ -141,19 +141,19 @@ export const VARIANT_METAFIELDS_CONFIG = [
   {
     namespace: "custom",
     key: "width",
-    type: "dimension",
+    type: "number_decimal",
     owner: "variant",
   },
   {
     namespace: "custom",
     key: "depth",
-    type: "dimension",
+    type: "number_decimal",
     owner: "variant",
   },
   {
     namespace: "custom",
     key: "height",
-    type: "dimension",
+    type: "number_decimal",
     owner: "variant",
   },
   {
@@ -175,19 +175,19 @@ export const VARIANT_METAFIELDS_CONFIG = [
   {
     namespace: "custom",
     key: "packaged_width",
-    type: "dimension",
+    type: "number_decimal",
     owner: "variant",
   },
   {
     namespace: "custom",
     key: "packaged_depth",
-    type: "dimension",
+    type: "number_decimal",
     owner: "variant",
   },
   {
     namespace: "custom",
     key: "packaged_height",
-    type: "dimension",
+    type: "number_decimal",
     owner: "variant",
   },
   {
