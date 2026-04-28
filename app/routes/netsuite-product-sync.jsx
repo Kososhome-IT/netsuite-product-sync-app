@@ -133,7 +133,6 @@ export const action = async ({ request }) => {
   let sku;
   let title;
   let netsuite_user = "system";
-  console.log("🔍 VARIANT ID 1:", variantId);
 
   try {
     /* ================= SESSION ================= */
@@ -166,7 +165,7 @@ export const action = async ({ request }) => {
 
     /* ================= PAYLOAD ================= */
     const payload = await request.json();
-console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
+    console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
 
     const { netsuite_category } = payload;
 
@@ -183,7 +182,6 @@ console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
       weight,
       metafields = [],
       variant_metafields = [],
-      quantity_by_location = {},
     } = payload;
 console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
     if (!title || !sku) {
@@ -365,14 +363,12 @@ if (setErrors?.length) {
 }
 
       inventoryItemId = node.inventoryItem.id;
-console.log("🔍 VARIANT ID 2:", variantId);
-      categoryMetafields =
-        createCategoryConfig?.metafields || [];
+      categoryMetafields = createCategoryConfig?.metafields || [];
     } else {
       productId = existingVariant.product.id;
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
-      console.log("🔍 VARIANT ID 3:", variantId);
+      // console.log("🔍 VARIANT ID 3:", variantId);
     }
 /* ================= UPDATE SKU / BARCODE / HS CODE ================= */
 
@@ -498,7 +494,7 @@ const globalVariantKeys = new Set(
 const variantAllowedKeys = new Set([
   ...globalVariantKeys,
 ]);
-console.log("🔍 VARIANT ALLOWED KEYS:", [...variantAllowedKeys]);
+// console.log("🔍 VARIANT ALLOWED KEYS:", [...variantAllowedKeys]);
     const payloadMetaobjectFields = metafields.filter(
       (mf) => mf.type === "metaobject_reference"
     );
@@ -596,12 +592,12 @@ const variant_filteredNormalFields = variant_payloadNormalFields.filter(
 
     const isValid = isValidMetafieldValue(mf.value);
 
-    console.log("🔍 CHECK VARIANT MF:", {
-      key,
-      value: mf.value,
-      isAllowed,
-      isValid,
-    });
+    // console.log("🔍 CHECK VARIANT MF:", {
+    //   key,
+    //   value: mf.value,
+    //   isAllowed,
+    //   isValid,
+    // });
 
     return isAllowed && isValid;
   }
@@ -633,12 +629,12 @@ const variant_filteredNormalFields = variant_payloadNormalFields.filter(
     ...variant_filteredNormalFields,
     ...variantResolvedMetaobjectFields,
   ];
-console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
+// console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
   const CHUNK_SIZE = 25;
 
   for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
     const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
-console.log("🔍 SENDING VARIANT CHUNK:", chunk);
+console.log(`🔍 SENDING VARIANT CHUNK:${i}`, chunk);
     const response = await admin.request(
       `
       mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -660,8 +656,7 @@ console.log("🔍 SENDING VARIANT CHUNK:", chunk);
       }
     );
 
-    const errors =
-      response?.data?.metafieldsSet?.userErrors;
+    const errors = response?.data?.metafieldsSet?.userErrors;
       console.log("🔍 SHOPIFY VARIANT RESPONSE:", JSON.stringify(response, null, 2));
 
    if (errors?.length) {
