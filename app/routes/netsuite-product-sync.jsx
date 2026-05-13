@@ -250,6 +250,7 @@ export const action = async ({ request }) => {
     variables: {
       product: {
         title,
+         status: "DRAFT",
         handle: [
   payload.handle || slugify(title),
   slugify(color),
