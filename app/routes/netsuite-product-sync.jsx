@@ -165,7 +165,7 @@ export const action = async ({ request }) => {
 
     /* ================= PAYLOAD ================= */
     const payload = await request.json();
-    console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
+    // console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
 
     const { netsuite_category } = payload;
 
@@ -183,7 +183,7 @@ export const action = async ({ request }) => {
       metafields = [],
       variant_metafields = [],
     } = payload;
-console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
+// console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
     if (!title || !sku) {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
@@ -263,6 +263,13 @@ console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
                 values: [{ name: payload.size.trim() }],
               }]
             : []),
+
+          ...(payload.style && payload.style.trim()
+            ? [{
+                name: "Style",
+                values: [{ name: payload.style.trim() }],
+              }]
+            : []),  
         ],
       },
     },
@@ -297,69 +304,178 @@ console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
         productQueryRes.data.product.variants.edges[0].node;
 
       variantId = node.id;
-const productSetRes = await admin.request(
+      /* ================= LINK COLOR METAOBJECT ================= */
+
+if (color && color.trim()) {
+console.log('run 1')
+  const colorMetaobjectIds =
+    await resolveMetaobjectIdsByDisplayValues({
+      admin,
+      metaobjectType: "shopify--color-pattern",
+      displayFieldKey: "label",
+      displayValues: [color],
+    });
+
+  const colorMetaobjectId =
+    colorMetaobjectIds?.[0];
+console.log(colorMetaobjectId)
+  if (!colorMetaobjectId) {
+    throw new Error(
+      `No color metaobject found for: ${color}`
+    );
+  }
+
+  /* ================= REFRESH PRODUCT OPTIONS ================= */
+
+  const optionQueryRes = await admin.request(
+    `
+    query ($id: ID!) {
+      product(id: $id) {
+        options {
+          id
+          name
+
+          optionValues {
+            id
+            name
+          }
+        }
+      }
+    }
+    `,
+    {
+      variables: {
+        id: productId,
+      }
+    }
+  );
+
+  const colorOption =
+    optionQueryRes.data.product.options.find(
+      (o) => o.name === "Color"
+    );
+
+    console.log(
+  "🎨 COLOR OPTION:",
+  JSON.stringify(colorOption, null, 2)
+);
+
+  if (!colorOption) {
+    throw new Error(
+      "Color option not found"
+    );
+  }
+
+  const colorOptionValue =
+    colorOption.optionValues.find(
+      (v) => v.name === color.trim()
+    );
+
+  if (!colorOptionValue) {
+    throw new Error(
+      "Color option value not found"
+    );
+  }
+
+  /* ================= CONVERT OPTION TO LINKED ================= */
+
+  const optionUpdateRes = await admin.request(
+    `
+    mutation productOptionUpdate(
+      $productId: ID!,
+      $option: OptionUpdateInput!,
+      $optionValuesToUpdate: [OptionValueUpdateInput!],
+      
+    ) {
+      productOptionUpdate(
+        productId: $productId,
+        option: $option,
+        optionValuesToUpdate: $optionValuesToUpdate,
+      ) {
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    `,
+    {
+      variables: {
+        productId,
+
+        option: {
+          id: colorOption.id,
+
+          linkedMetafield: {
+            namespace: "shopify",
+            key: "color-pattern",
+          }
+        },
+
+        optionValuesToUpdate: [
+          {
+            id: colorOptionValue.id,
+            linkedMetafieldValue:
+              colorMetaobjectId,
+          }
+        ]
+      }
+    }
+  );
+
+  const optionErrors =
+    optionUpdateRes
+      ?.data
+      ?.productOptionUpdate
+      ?.userErrors;
+console.log(
+  "🔗 OPTION UPDATE RESPONSE:",
+  JSON.stringify(optionUpdateRes, null, 2)
+);
+  if (optionErrors?.length) {
+    throw new Error(
+      JSON.stringify(optionErrors)
+    );
+  }
+
+  const verifyRes = await admin.request(
   `
-  mutation productSet($input: ProductSetInput!) {
-    productSet(input: $input) {
-      userErrors {
-        field
-        message
+  query ($id: ID!) {
+    product(id: $id) {
+
+      options {
+        id
+        name
+
+        linkedMetafield {
+          namespace
+          key
+        }
+
+        optionValues {
+          id
+          name
+          linkedMetafieldValue
+        }
       }
     }
   }
   `,
   {
     variables: {
-      input: {
-        id: productId,
-
-        // 🔥 ADD THIS (MANDATORY)
-        productOptions: [
-          ...(color && color.trim()
-            ? [{
-                name: "Color",
-                values: [{ name: color.trim() }],
-              }]
-            : []),
-
-          ...(size && size.trim()
-            ? [{
-                name: "Size",
-                values: [{ name: size.trim() }],
-              }]
-            : []),
-        ],
-
-        // 🔥 KEEP THIS
-        variants: [
-          {
-            id: variantId,
-
-            optionValues: [
-              ...(color && color.trim()
-                ? [{
-                    name: color.trim(),
-                    optionName: "Color",
-                  }]
-                : []),
-
-              ...(size && size.trim()
-                ? [{
-                    name: size.trim(),
-                    optionName: "Size",
-                  }]
-                : []),
-            ],
-          },
-        ],
-      },
-    },
+      id: productId,
+    }
   }
 );
-const setErrors = productSetRes?.data?.productSet?.userErrors;
 
-if (setErrors?.length) {
-  throw new Error(JSON.stringify(setErrors));
+console.log(
+  "✅ FINAL VERIFY:",
+  JSON.stringify(
+    verifyRes.data.product.options,
+    null,
+    2
+  )
+);
 }
 
       inventoryItemId = node.inventoryItem.id;
@@ -634,7 +750,7 @@ const variant_filteredNormalFields = variant_payloadNormalFields.filter(
 
   for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
     const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
-console.log(`🔍 SENDING VARIANT CHUNK:${i}`, chunk);
+// console.log(`🔍 SENDING VARIANT CHUNK:${i}`, chunk);
     const response = await admin.request(
       `
       mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -657,7 +773,7 @@ console.log(`🔍 SENDING VARIANT CHUNK:${i}`, chunk);
     );
 
     const errors = response?.data?.metafieldsSet?.userErrors;
-      console.log("🔍 SHOPIFY VARIANT RESPONSE:", JSON.stringify(response, null, 2));
+      // console.log("🔍 SHOPIFY VARIANT RESPONSE:", JSON.stringify(response, null, 2));
 
    if (errors?.length) {
   console.error("❌ VARIANT METAFIELD ERROR:", errors);
