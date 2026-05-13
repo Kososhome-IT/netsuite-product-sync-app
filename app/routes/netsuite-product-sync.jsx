@@ -13,6 +13,15 @@ import {
   VARIANT_METAFIELDS_CONFIG
 } from "../services/category-resolver";
 
+//============helper function===============
+function slugify(str) {
+  return String(str || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 /* =====================================================
  * METAOBJECT LIST RESOLVER
  * ===================================================== */
@@ -241,6 +250,12 @@ export const action = async ({ request }) => {
     variables: {
       product: {
         title,
+        handle: [
+  payload.handle || slugify(title),
+  slugify(color),
+]
+  .filter(Boolean)
+  .join("-"),
         vendor,
         descriptionHtml,
 
