@@ -251,9 +251,14 @@ export const action = async ({ request }) => {
       product: {
         title,
          status: "DRAFT",
-        handle: [
+       handle: [
   payload.handle || slugify(title),
+
+  slugify(payload.style),
+
   slugify(color),
+
+  slugify(size),
 ]
   .filter(Boolean)
   .join("-"),
