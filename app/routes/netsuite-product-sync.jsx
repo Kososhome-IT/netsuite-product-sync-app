@@ -545,6 +545,10 @@ if (variantId && productId) {
         variants: [
           {
             id: variantId,
+            taxable: false,
+               ...(price && {
+      price: String(price),
+    }),
 
             ...(barcode && { barcode }),
 
