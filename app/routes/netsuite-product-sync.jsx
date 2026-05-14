@@ -34,7 +34,7 @@ async function resolveMetaobjectIdsByDisplayValues({
   const res = await admin.request(
     `
     query ($type: String!) {
-      metaobjects(type: $type, first: 250) {
+      metaobjects(type: $type, first: 500) {
         nodes {
           id
           fields { key value }
