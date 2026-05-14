@@ -34,7 +34,7 @@ async function resolveMetaobjectIdsByDisplayValues({
   const res = await admin.request(
     `
     query ($type: String!) {
-      metaobjects(type: $type, first: 500) {
+      metaobjects(type: $type, first: 250) {
         nodes {
           id
           fields { key value }
@@ -250,15 +250,10 @@ export const action = async ({ request }) => {
     variables: {
       product: {
         title,
-         status: "DRAFT",
-       handle: [
+        status: "DRAFT",
+        handle: [
   payload.handle || slugify(title),
-
-  slugify(payload.style),
-
   slugify(color),
-
-  slugify(size),
 ]
   .filter(Boolean)
   .join("-"),
