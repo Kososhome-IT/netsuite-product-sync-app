@@ -31,21 +31,66 @@ async function resolveMetaobjectIdsByDisplayValues({
   displayFieldKey,
   displayValues,
 }) {
+ let allNodes = [];
+
+let hasNextPage = true;
+let cursor = null;
+
+while (hasNextPage) {
+
   const res = await admin.request(
     `
-    query ($type: String!) {
-      metaobjects(type: $type, first: 250) {
+    query ($type: String!, $cursor: String) {
+      metaobjects(
+        type: $type,
+        first: 250,
+        after: $cursor
+      ) {
+
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+
         nodes {
           id
-          fields { key value }
+
+          fields {
+            key
+            value
+          }
         }
       }
     }
     `,
-    { variables: { type: metaobjectType } }
+    {
+      variables: {
+        type: metaobjectType,
+        cursor,
+      }
+    }
   );
 
-  const nodes = res?.data?.metaobjects?.nodes || [];
+  const data =
+    res?.data?.metaobjects;
+
+  const nodes =
+    data?.nodes || [];
+
+  allNodes.push(...nodes);
+
+  hasNextPage =
+    data?.pageInfo?.hasNextPage;
+
+  cursor =
+    data?.pageInfo?.endCursor;
+
+  console.log(
+    `📦 FETCHED METAOBJECTS: ${allNodes.length}`
+  );
+}
+
+const nodes = allNodes;
   const valueSet = new Set(displayValues);
   const resolvedIds = [];
 
@@ -229,6 +274,7 @@ export const action = async ({ request }) => {
     /* ================= CREATE ================= */
     if (!existingVariant) {
       actionType = "created";
+      const prohandle = [payload.handle || slugify(title),slugify(payload.style),slugify(color),slugify(size)].filter(Boolean).join("-")
 
       const productRes = await admin.request(
   `
@@ -251,12 +297,7 @@ export const action = async ({ request }) => {
       product: {
         title,
         status: "DRAFT",
-        handle: [
-  payload.handle || slugify(title),
-  slugify(color),
-]
-  .filter(Boolean)
-  .join("-"),
+        handle: prohandle,
         vendor,
         descriptionHtml,
 
