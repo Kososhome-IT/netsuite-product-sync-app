@@ -96,7 +96,7 @@ export default function DashboardPage() {
     entry.netsuite_user || "—",
     entry.product_sku || "—",
     entry.shopify_product_id || "—",
-    entry.product_name || "—",
+    entry.product_name || "NA",
 
     <Badge
       key={`action-${entry.id}`}
@@ -111,7 +111,7 @@ export default function DashboardPage() {
     >
       {entry.status}
     </Badge>,
-
+    entry.error_message || "No Error",
     new Date(entry.updated_at).toLocaleString(),
   ]);
 
@@ -171,6 +171,7 @@ export default function DashboardPage() {
                       "text",
                       "text",
                       "text",
+                      "text",
                     ]}
                     headings={[
                       "NetSuite User",
@@ -179,6 +180,7 @@ export default function DashboardPage() {
                       "Product Name",
                       "Action",
                       "Status",
+                      "Error Massage",
                       "Updated At",
                     ]}
                     rows={rows}
