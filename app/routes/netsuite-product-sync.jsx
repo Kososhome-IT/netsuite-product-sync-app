@@ -227,7 +227,7 @@ export const action = async ({ request }) => {
     const { color, size } = payload;
 
     const {
-      descriptionHtml = "",
+      descriptionHtml,
       vendor,
       price = "0.00",
       barcode,
