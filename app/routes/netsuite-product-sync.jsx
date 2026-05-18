@@ -187,6 +187,7 @@ export const action = async ({ request }) => {
   let sku;
   let title;
   let netsuite_user = "system";
+  let warningLogs = [];
 
   try {
     /* ================= SESSION ================= */
@@ -377,9 +378,12 @@ console.log('run 1')
     colorMetaobjectIds?.[0];
 console.log(colorMetaobjectId)
   if (!colorMetaobjectId) {
-    throw new Error(
-      `No color metaobject found for: ${color}`
-    );
+    const warningMessage =
+  `No color metaobject found for color: ${color}`;
+
+console.log(`⚠️ ${warningMessage}`);
+
+warningLogs.push(warningMessage);
   }
 
   /* ================= REFRESH PRODUCT OPTIONS ================= */
@@ -884,7 +888,8 @@ const variant_filteredNormalFields = variant_payloadNormalFields.filter(
       shopify_product_id: productId,
       product_name: title,
       action: actionType,
-      status: "success",
+      status:warningLogs.length ? "warning" : "success",
+      error_message:warningLogs.length ? warningLogs.join(" | ") : null,
     });
 
     return json({ success: true, action: actionType });
