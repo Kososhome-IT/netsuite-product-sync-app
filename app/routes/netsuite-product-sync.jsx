@@ -385,7 +385,7 @@ console.log(`⚠️ ${warningMessage}`);
 
 warningLogs.push(warningMessage);
   }
-
+else{
   /* ================= REFRESH PRODUCT OPTIONS ================= */
 
   const optionQueryRes = await admin.request(
@@ -538,7 +538,7 @@ console.log(
   )
 );
 }
-
+}
       inventoryItemId = node.inventoryItem.id;
 await admin.request(
   `
