@@ -132,7 +132,11 @@ function parseInchesAndPounds(rawValue) {
 
   // extract number
   const numberMatch = str.match(/[\d.]+/);
-  const value = numberMatch ? Number(numberMatch[0]) : null;
+  const value = numberMatch
+  ? parseFloat(
+      Number(numberMatch[0]).toFixed(2)
+    )
+  : null;
 
   if (!value) return null;
 
@@ -231,6 +235,7 @@ export const action = async ({ request }) => {
       descriptionHtml,
       vendor,
       price = "0.00",
+      compare_at,
       barcode,
       hs_code,
       country_of_origin,
@@ -607,10 +612,13 @@ if (variantId && productId) {
           {
             id: variantId,
             taxable: false,
+            inventoryPolicy: "CONTINUE",
                ...(price && {
       price: String(price),
     }),
-
+...(compare_at && {
+  compareAtPrice: String(compare_at),
+}),
             ...(barcode && { barcode }),
 
             inventoryItem: {
