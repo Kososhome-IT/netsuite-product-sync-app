@@ -87,7 +87,12 @@ while (hasNextPage) {
 
   console.log(
     `📦 FETCHED METAOBJECTS: ${allNodes.length}`
+    
   );
+ console.log(
+  "📦 FETCHED METAOBJECTS:",
+  JSON.stringify(allNodes, null, 2)
+);
 }
 
 const nodes = allNodes;
@@ -743,7 +748,7 @@ const variantAllowedKeys = new Set([
         admin,
         metaobjectType: mf.metaobject_type,
         displayFieldKey: mf.display_field_key,
-        displayValues: mf.value,
+        displayValues: [mf.value],
       });
 
       if (!resolvedIds.length) continue;
@@ -829,29 +834,32 @@ const variant_filteredNormalFields = variant_payloadNormalFields.filter(
   for (const mf of variant_payloadMetaobjectFields) {
     if (!variantAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
       continue;
-
+console.log(mf.metaobject_type)
+console.log(mf.display_field_key)
+console.log(mf.value)
     const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
       admin,
       metaobjectType: mf.metaobject_type,
       displayFieldKey: mf.display_field_key,
-      displayValues: mf.value,
+      displayValues: [mf.value],
     });
-
+console.log("resolvedIds.length",resolvedIds.length)
     if (!resolvedIds.length) continue;
 
     variantResolvedMetaobjectFields.push({
       namespace: mf.namespace || "custom",
       key: mf.key,
       type: mf.type,
-      value: JSON.stringify(resolvedIds),
+      value: resolvedIds[0],
     });
   }
+  console.log("variantResolvedMetaobjectFields",variantResolvedMetaobjectFields)
 
   const finalVariantMetafields = [
     ...variant_filteredNormalFields,
     ...variantResolvedMetaobjectFields,
   ];
-// console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
+console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
   const CHUNK_SIZE = 25;
 
   for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {

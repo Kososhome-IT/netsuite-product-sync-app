@@ -61,6 +61,7 @@ export const GLOBAL_METAFIELDS_CONFIG = [
     key: "collection",
     type: "single_line_text_field",
   },
+         
   {
     namespace: "custom",
     key: "class",
@@ -318,6 +319,8 @@ export const VARIANT_METAFIELDS_CONFIG = [
   {
   namespace: "custom",
   key: "materials",
+  metaobject_type:"material_care",
+  display_field_key:"material_name",
   type: "metaobject_reference",
   owner: "variant",
 },
@@ -4457,6 +4460,11 @@ export const CATEGORY_CONFIG = {
         type: "single_line_text_field",
         value: ""
       },
+       { "namespace": "custom", "key": "performance", "type": "single_line_text_field", "value": "" },
+          { "namespace": "custom", "key": "style_trend", "type": "single_line_text_field", "value": "" },
+          { "namespace": "custom", "key": "yarn_dyed", "type": "single_line_text_field", "value": "" },
+          { "namespace": "custom", "key": "zipper_type", "type": "single_line_text_field", "value": "" },
+          { "namespace": "custom", "key": "zipper_size_in", "type": "single_line_text_field", "value": "" },
       {
         namespace: "custom",
         key: "backing_included",
