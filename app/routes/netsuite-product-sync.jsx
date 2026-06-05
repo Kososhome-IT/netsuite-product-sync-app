@@ -89,10 +89,10 @@ while (hasNextPage) {
     `📦 FETCHED METAOBJECTS: ${allNodes.length}`
     
   );
- console.log(
-  "📦 FETCHED METAOBJECTS:",
-  JSON.stringify(allNodes, null, 2)
-);
+//  console.log(
+//   "📦 FETCHED METAOBJECTS:",
+//   JSON.stringify(allNodes, null, 2)
+// );
 }
 
 const nodes = allNodes;
@@ -229,7 +229,7 @@ export const action = async ({ request }) => {
 
     /* ================= PAYLOAD ================= */
     const payload = await request.json();
-    // console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
+    console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
 
     const { netsuite_category } = payload;
 
@@ -248,7 +248,7 @@ export const action = async ({ request }) => {
       metafields = [],
       variant_metafields = [],
     } = payload;
-// console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
+console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
     if (!title || !sku) {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
@@ -834,16 +834,13 @@ const variant_filteredNormalFields = variant_payloadNormalFields.filter(
   for (const mf of variant_payloadMetaobjectFields) {
     if (!variantAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
       continue;
-console.log(mf.metaobject_type)
-console.log(mf.display_field_key)
-console.log(mf.value)
     const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
       admin,
       metaobjectType: mf.metaobject_type,
       displayFieldKey: mf.display_field_key,
       displayValues: [mf.value],
     });
-console.log("resolvedIds.length",resolvedIds.length)
+// console.log("resolvedIds.length",resolvedIds.length)
     if (!resolvedIds.length) continue;
 
     variantResolvedMetaobjectFields.push({
@@ -853,7 +850,7 @@ console.log("resolvedIds.length",resolvedIds.length)
       value: resolvedIds[0],
     });
   }
-  console.log("variantResolvedMetaobjectFields",variantResolvedMetaobjectFields)
+  // console.log("variantResolvedMetaobjectFields",variantResolvedMetaobjectFields)
 
   const finalVariantMetafields = [
     ...variant_filteredNormalFields,
