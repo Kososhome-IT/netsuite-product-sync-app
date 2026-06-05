@@ -336,7 +336,12 @@ export const VARIANT_METAFIELDS_CONFIG = [
     type: "single_line_text_field",
     owner: "variant",
   },
-
+ {
+    namespace: "custom",
+    key: "color",
+    type: "single_line_text_field",
+    owner: "variant",
+  },
   /* ================= FLAGS ================= */
   {
     namespace: "custom",
