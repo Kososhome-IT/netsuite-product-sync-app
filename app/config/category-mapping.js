@@ -316,11 +316,11 @@ export const VARIANT_METAFIELDS_CONFIG = [
     owner: "variant",
   },
   {
-    namespace: "custom",
-    key: "materials",
-    type: "single_line_text_field",
-    owner: "variant",
-  },
+  namespace: "custom",
+  key: "materials",
+  type: "metaobject_reference",
+  owner: "variant",
+},
   {
     namespace: "custom",
     key: "size",
