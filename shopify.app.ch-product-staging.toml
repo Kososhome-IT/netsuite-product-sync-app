@@ -1,0 +1,24 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "7a97234fcb34e9ca09acc9de0787ef1e"
+application_url = "https://directions-science-css-flashers.trycloudflare.com"
+embedded = true
+name = "ch-product-staging"
+
+[webhooks]
+api_version = "2026-07"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "customer_read_metaobjects,read_inventory,read_locations,read_metaobjects,read_products,unauthenticated_read_metaobjects,write_inventory,write_locations,write_metaobjects,write_products"
+
+[auth]
+redirect_urls = [
+  "https://directions-science-css-flashers.trycloudflare.com/auth/callback",
+  "https://directions-science-css-flashers.trycloudflare.com/auth/shopify/callback",
+  "https://directions-science-css-flashers.trycloudflare.com/api/auth/callback"
+]
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
