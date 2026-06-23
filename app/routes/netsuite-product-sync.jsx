@@ -4,16 +4,16 @@ import { ApiVersion } from "@shopify/shopify-app-remix/server";
 import { sessionStorage } from "../shopify.server";
 import { insertLog } from "../utils/insert-dashboard-log";
 import { COUNTRY_MAP } from "../config/countries";
-
 import {
   resolveFromNetSuite,
   resolveFromShopifyCategoryId,
   mergeMetafields,
   GLOBAL_METAFIELDS_CONFIG,
-  VARIANT_METAFIELDS_CONFIG
+  VARIANT_METAFIELDS_CONFIG,
 } from "../services/category-resolver";
 
-//============helper function===============
+// ============ HELPER FUNCTIONS ============
+
 function slugify(str) {
   return String(str || "")
     .toLowerCase()
@@ -31,71 +31,48 @@ async function resolveMetaobjectIdsByDisplayValues({
   displayFieldKey,
   displayValues,
 }) {
- let allNodes = [];
+  let allNodes = [];
+  let hasNextPage = true;
+  let cursor = null;
 
-let hasNextPage = true;
-let cursor = null;
-
-while (hasNextPage) {
-
-  const res = await admin.request(
-    `
-    query ($type: String!, $cursor: String) {
-      metaobjects(
-        type: $type,
-        first: 250,
-        after: $cursor
-      ) {
-
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-
-        nodes {
-          id
-
-          fields {
-            key
-            value
+  while (hasNextPage) {
+    const res = await admin.request(
+      `
+      query ($type: String!, $cursor: String) {
+        metaobjects(type: $type, first: 250, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {
+            id
+            fields {
+              key
+              value
+            }
           }
         }
       }
-    }
-    `,
-    {
-      variables: {
-        type: metaobjectType,
-        cursor,
+      `,
+      {
+        variables: {
+          type: metaobjectType,
+          cursor,
+        },
       }
-    }
-  );
+    );
 
-  const data =
-    res?.data?.metaobjects;
+    const data = res?.data?.metaobjects;
+    const nodes = data?.nodes || [];
 
-  const nodes =
-    data?.nodes || [];
+    allNodes.push(...nodes);
+    hasNextPage = data?.pageInfo?.hasNextPage;
+    cursor = data?.pageInfo?.endCursor;
 
-  allNodes.push(...nodes);
+    console.log(`📦 FETCHED METAOBJECTS: ${allNodes.length}`);
+  }
 
-  hasNextPage =
-    data?.pageInfo?.hasNextPage;
-
-  cursor =
-    data?.pageInfo?.endCursor;
-
-  console.log(
-    `📦 FETCHED METAOBJECTS: ${allNodes.length}`
-    
-  );
-//  console.log(
-//   "📦 FETCHED METAOBJECTS:",
-//   JSON.stringify(allNodes, null, 2)
-// );
-}
-
-const nodes = allNodes;
+  const nodes = allNodes;
   const valueSet = new Set(displayValues);
   const resolvedIds = [];
 
@@ -138,31 +115,24 @@ function parseInchesAndPounds(rawValue) {
   // extract number
   const numberMatch = str.match(/[\d.]+/);
   const value = numberMatch
-  ? parseFloat(
-      Number(numberMatch[0]).toFixed(2)
-    )
-  : null;
+    ? parseFloat(Number(numberMatch[0]).toFixed(2))
+    : null;
 
   if (!value) return null;
 
   // detect unit
   let unit = null;
-
   if (str.includes("in") || str.includes("inch")) {
     unit = "in";
   } else if (str.includes("lb") || str.includes("pound")) {
     unit = "lb";
   }
 
-  return {
-    value,
-    unit,
-  };
+  return { value, unit };
 }
 
 function transformMetafieldValue(mf) {
   const raw = mf.value;
-
   const parsed = parseInchesAndPounds(raw);
 
   // DIMENSION
@@ -186,6 +156,9 @@ function transformMetafieldValue(mf) {
   return JSON.stringify(raw);
 }
 
+/* =====================================================
+ * REMIX ACTION HANDLER
+ * ===================================================== */
 export const action = async ({ request }) => {
   const shop = process.env.SHOP;
 
@@ -232,7 +205,6 @@ export const action = async ({ request }) => {
     console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
 
     const { netsuite_category } = payload;
-
     ({ title, sku, netsuite_user = "system" } = payload);
     const { color, size } = payload;
 
@@ -248,7 +220,9 @@ export const action = async ({ request }) => {
       metafields = [],
       variant_metafields = [],
     } = payload;
-console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
+
+    console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
+
     if (!title || !sku) {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
@@ -279,76 +253,66 @@ console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
       { variables: { query: `sku:${sku}` } }
     );
 
-    const existingVariant =
-      searchRes.data?.productVariants?.edges?.[0]?.node;
+    const existingVariant = searchRes.data?.productVariants?.edges?.[0]?.node;
 
-    /* ================= CREATE ================= */
+    /* ================= CREATE PRODUCT IF NOT EXISTS ================= */
     if (!existingVariant) {
       actionType = "created";
-      const prohandle = [payload.handle || slugify(title),slugify(payload.style),slugify(color),slugify(size)].filter(Boolean).join("-")
+      const prohandle = [
+        payload.handle || slugify(title),
+        slugify(payload.style),
+        slugify(color),
+        slugify(size),
+      ]
+        .filter(Boolean)
+        .join("-");
 
       const productRes = await admin.request(
-  `
-  mutation productCreate($product: ProductCreateInput!) {
-    productCreate(product: $product) {
-      product {
-        id
-        options {
-          id
-          name
-          optionValues { name }
+        `
+        mutation productCreate($product: ProductCreateInput!) {
+          productCreate(product: $product) {
+            product {
+              id
+              options {
+                id
+                name
+                optionValues { name }
+              }
+            }
+            userErrors { field message }
+          }
         }
-      }
-      userErrors { field message }
-    }
-  }
-  `,
-  {
-    variables: {
-      product: {
-        title,
-        status: "DRAFT",
-        handle: prohandle,
-        vendor,
-        descriptionHtml,
-
-        ...(createCategoryConfig && {
-          category: createCategoryConfig.taxonomyId,
-        }),
-
-        // 🔥 CREATE OPTIONS HERE
-        productOptions: [
-          ...(payload.color && payload.color.trim()
-            ? [{
-                name: "Color",
-                values: [{ name: payload.color.trim() }],
-              }]
-            : []),
-
-          ...(payload.size && payload.size.trim()
-            ? [{
-                name: "Size",
-                values: [{ name: payload.size.trim() }],
-              }]
-            : []),
-
-          ...(payload.style && payload.style.trim()
-            ? [{
-                name: "Style",
-                values: [{ name: payload.style.trim() }],
-              }]
-            : []),  
-        ],
-      },
-    },
-  }
-);
-
+        `,
+        {
+          variables: {
+            product: {
+              title,
+              status: "DRAFT",
+              handle: prohandle,
+              vendor,
+              descriptionHtml,
+              ...(createCategoryConfig && {
+                category: createCategoryConfig.taxonomyId,
+              }),
+              // CREATE OPTIONS HERE
+              productOptions: [
+                ...(payload.color && payload.color.trim()
+                  ? [{ name: "Color", values: [{ name: payload.color.trim() }] }]
+                  : []),
+                ...(payload.size && payload.size.trim()
+                  ? [{ name: "Size", values: [{ name: payload.size.trim() }] }]
+                  : []),
+                ...(payload.style && payload.style.trim()
+                  ? [{ name: "Style", values: [{ name: payload.style.trim() }] }]
+                  : []),
+              ],
+            },
+          },
+        }
+      );
 
       if (productRes.data.productCreate.userErrors.length) {
-        throw new Error(
-          JSON.stringify(productRes.data.productCreate.userErrors)
-        );
+        throw new Error(JSON.stringify(productRes.data.productCreate.userErrors));
       }
 
       productId = productRes.data.productCreate.product.id;
@@ -368,283 +332,190 @@ console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
         { variables: { id: productId } }
       );
 
-      const node =
-        productQueryRes.data.product.variants.edges[0].node;
-
+      const node = productQueryRes.data.product.variants.edges[0].node;
       variantId = node.id;
+
       /* ================= LINK COLOR METAOBJECT ================= */
+      if (color && color.trim()) {
+        console.log("run 1");
+        const colorMetaobjectIds = await resolveMetaobjectIdsByDisplayValues({
+          admin,
+          metaobjectType: "shopify--color-pattern",
+          displayFieldKey: "label",
+          displayValues: [color],
+        });
 
-if (color && color.trim()) {
-console.log('run 1')
-  const colorMetaobjectIds =
-    await resolveMetaobjectIdsByDisplayValues({
-      admin,
-      metaobjectType: "shopify--color-pattern",
-      displayFieldKey: "label",
-      displayValues: [color],
-    });
+        const colorMetaobjectId = colorMetaobjectIds?.[0];
+        console.log(colorMetaobjectId);
 
-  const colorMetaobjectId =
-    colorMetaobjectIds?.[0];
-console.log(colorMetaobjectId)
-  if (!colorMetaobjectId) {
-    const warningMessage =
-  `No color metaobject found for color: ${color}`;
+        if (!colorMetaobjectId) {
+          const warningMessage = `No color metaobject found for color: ${color}`;
+          console.log(`⚠️ ${warningMessage}`);
+          warningLogs.push(warningMessage);
+        } else {
+          /* ================= REFRESH PRODUCT OPTIONS ================= */
+          const optionQueryRes = await admin.request(
+            `
+            query ($id: ID!) {
+              product(id: $id) {
+                options {
+                  id
+                  name
+                  optionValues { id name }
+                }
+              }
+            }
+            `,
+            { variables: { id: productId } }
+          );
 
-console.log(`⚠️ ${warningMessage}`);
+          const colorOption = optionQueryRes.data.product.options.find(
+            (o) => o.name === "Color"
+          );
+          console.log("🎨 COLOR OPTION:", JSON.stringify(colorOption, null, 2));
 
-warningLogs.push(warningMessage);
-  }
-else{
-  /* ================= REFRESH PRODUCT OPTIONS ================= */
-
-  const optionQueryRes = await admin.request(
-    `
-    query ($id: ID!) {
-      product(id: $id) {
-        options {
-          id
-          name
-
-          optionValues {
-            id
-            name
+          if (!colorOption) {
+            throw new Error("Color option not found");
           }
-        }
-      }
-    }
-    `,
-    {
-      variables: {
-        id: productId,
-      }
-    }
-  );
 
-  const colorOption =
-    optionQueryRes.data.product.options.find(
-      (o) => o.name === "Color"
-    );
+          const colorOptionValue = colorOption.optionValues.find(
+            (v) => v.name === color.trim()
+          );
 
-    console.log(
-  "🎨 COLOR OPTION:",
-  JSON.stringify(colorOption, null, 2)
-);
-
-  if (!colorOption) {
-    throw new Error(
-      "Color option not found"
-    );
-  }
-
-  const colorOptionValue =
-    colorOption.optionValues.find(
-      (v) => v.name === color.trim()
-    );
-
-  if (!colorOptionValue) {
-    throw new Error(
-      "Color option value not found"
-    );
-  }
-
-  /* ================= CONVERT OPTION TO LINKED ================= */
-
-  const optionUpdateRes = await admin.request(
-    `
-    mutation productOptionUpdate(
-      $productId: ID!,
-      $option: OptionUpdateInput!,
-      $optionValuesToUpdate: [OptionValueUpdateInput!],
-      
-    ) {
-      productOptionUpdate(
-        productId: $productId,
-        option: $option,
-        optionValuesToUpdate: $optionValuesToUpdate,
-      ) {
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-    `,
-    {
-      variables: {
-        productId,
-
-        option: {
-          id: colorOption.id,
-
-          linkedMetafield: {
-            namespace: "shopify",
-            key: "color-pattern",
+          if (!colorOptionValue) {
+            throw new Error("Color option value not found");
           }
-        },
 
-        optionValuesToUpdate: [
-          {
-            id: colorOptionValue.id,
-            linkedMetafieldValue:
-              colorMetaobjectId,
+          /* ================= CONVERT OPTION TO LINKED ================= */
+          const optionUpdateRes = await admin.request(
+            `
+            mutation productOptionUpdate(
+              $productId: ID!,
+              $option: OptionUpdateInput!,
+              $optionValuesToUpdate: [OptionValueUpdateInput!],
+            ) {
+              productOptionUpdate(
+                productId: $productId,
+                option: $option,
+                optionValuesToUpdate: $optionValuesToUpdate,
+              ) {
+                userErrors { field message }
+              }
+            }
+            `,
+            {
+              variables: {
+                productId,
+                option: {
+                  id: colorOption.id,
+                  linkedMetafield: {
+                    namespace: "shopify",
+                    key: "color-pattern",
+                  },
+                },
+                optionValuesToUpdate: [
+                  {
+                    id: colorOptionValue.id,
+                    linkedMetafieldValue: colorMetaobjectId,
+                  },
+                ],
+              },
+            }
+          );
+
+          const optionErrors = optionUpdateRes?.data?.productOptionUpdate?.userErrors;
+          console.log("🔗 OPTION UPDATE RESPONSE:", JSON.stringify(optionUpdateRes, null, 2));
+
+          if (optionErrors?.length) {
+            throw new Error(JSON.stringify(optionErrors));
           }
-        ]
-      }
-    }
-  );
 
-  const optionErrors =
-    optionUpdateRes
-      ?.data
-      ?.productOptionUpdate
-      ?.userErrors;
-console.log(
-  "🔗 OPTION UPDATE RESPONSE:",
-  JSON.stringify(optionUpdateRes, null, 2)
-);
-  if (optionErrors?.length) {
-    throw new Error(
-      JSON.stringify(optionErrors)
-    );
-  }
+          const verifyRes = await admin.request(
+            `
+            query ($id: ID!) {
+              product(id: $id) {
+                options {
+                  id
+                  name
+                  linkedMetafield { namespace key }
+                  optionValues { id name linkedMetafieldValue }
+                }
+              }
+            }
+            `,
+            { variables: { id: productId } }
+          );
 
-  const verifyRes = await admin.request(
-  `
-  query ($id: ID!) {
-    product(id: $id) {
-
-      options {
-        id
-        name
-
-        linkedMetafield {
-          namespace
-          key
-        }
-
-        optionValues {
-          id
-          name
-          linkedMetafieldValue
+          console.log("✅ FINAL VERIFY:", JSON.stringify(verifyRes.data.product.options, null, 2));
         }
       }
-    }
-  }
-  `,
-  {
-    variables: {
-      id: productId,
-    }
-  }
-);
 
-console.log(
-  "✅ FINAL VERIFY:",
-  JSON.stringify(
-    verifyRes.data.product.options,
-    null,
-    2
-  )
-);
-}
-}
       inventoryItemId = node.inventoryItem.id;
-await admin.request(
-  `
-  mutation inventoryItemUpdate(
-    $id: ID!,
-    $input: InventoryItemInput!
-  ) {
-    inventoryItemUpdate(
-      id: $id,
-      input: $input
-    ) {
-      inventoryItem {
-        id
-        tracked
-      }
-
-      userErrors {
-        field
-        message
-      }
-    }
-  }
-  `,
-  {
-    variables: {
-      id: inventoryItemId,
-
-      input: {
-        tracked: true,
-      }
-    }
-  }
-);
+      await admin.request(
+        `
+        mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
+          inventoryItemUpdate(id: $id, input: $input) {
+            inventoryItem { id tracked }
+            userErrors { field message }
+          }
+        }
+        `,
+        {
+          variables: {
+            id: inventoryItemId,
+            input: { tracked: true },
+          },
+        }
+      );
 
       categoryMetafields = createCategoryConfig?.metafields || [];
     } else {
       productId = existingVariant.product.id;
       variantId = existingVariant.id;
       inventoryItemId = existingVariant.inventoryItem.id;
-      // console.log("🔍 VARIANT ID 3:", variantId);
     }
-/* ================= UPDATE SKU / BARCODE / HS CODE ================= */
 
-if (variantId && productId) {
-  const variantUpdateRes = await admin.request(
-    `
-    mutation productVariantsBulkUpdate(
-      $productId: ID!,
-      $variants: [ProductVariantsBulkInput!]!
-    ) {
-      productVariantsBulkUpdate(
-        productId: $productId,
-        variants: $variants
-      ) {
-        userErrors {
-          field
-          message
+    /* ================= UPDATE SKU / BARCODE / HS CODE ================= */
+    if (variantId && productId) {
+      const variantUpdateRes = await admin.request(
+        `
+        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            userErrors { field message }
+          }
         }
+        `,
+        {
+          variables: {
+            productId: productId,
+            variants: [
+              {
+                id: variantId,
+                taxable: false,
+                inventoryPolicy: "CONTINUE",
+                ...(price && { price: String(price) }),
+                ...(compare_at && { compareAtPrice: String(compare_at) }),
+                ...(barcode && { barcode }),
+                inventoryItem: {
+                  ...(sku && { sku }),
+                  ...(hs_code && { harmonizedSystemCode: hs_code }),
+                  ...(country_of_origin && {
+                    countryCodeOfOrigin: COUNTRY_MAP[country_of_origin] || country_of_origin,
+                  }),
+                },
+              },
+            ],
+          },
+        }
+      );
+
+      const errors = variantUpdateRes?.data?.productVariantsBulkUpdate?.userErrors;
+      if (errors?.length) {
+        throw new Error(JSON.stringify(errors));
       }
     }
-    `,
-    {
-      variables: {
-        productId: productId,
-        variants: [
-          {
-            id: variantId,
-            taxable: false,
-            inventoryPolicy: "CONTINUE",
-               ...(price && {
-      price: String(price),
-    }),
-...(compare_at && {
-  compareAtPrice: String(compare_at),
-}),
-            ...(barcode && { barcode }),
 
-            inventoryItem: {
-              ...(sku && { sku }),
-              ...(hs_code && { harmonizedSystemCode: hs_code }),
-              ...(country_of_origin && {countryCodeOfOrigin:COUNTRY_MAP[country_of_origin] || country_of_origin,}),
-            },
-          },
-        ],
-      },
-    }
-  );
-
-  const errors =
-    variantUpdateRes?.data?.productVariantsBulkUpdate?.userErrors;
-
-  if (errors?.length) {
-    throw new Error(JSON.stringify(errors));
-  }
-}
-    /* ================= UPDATE PRODUCT ================= */
+    /* ================= UPDATE PRODUCT DETAILS ================= */
     await admin.request(
       `
       mutation productUpdate($input: ProductInput!) {
@@ -681,68 +552,52 @@ if (variantId && productId) {
         { variables: { id: productId } }
       );
 
-      const updateCategoryConfig =
-        resolveFromShopifyCategoryId(
-          categoryRes.data.product.category?.id
-        );
-
-      categoryMetafields =
-        updateCategoryConfig?.metafields || [];
+      const updateCategoryConfig = resolveFromShopifyCategoryId(
+        categoryRes.data.product.category?.id
+      );
+      categoryMetafields = updateCategoryConfig?.metafields || [];
     }
 
     /* =====================================================
-       CONTROLLED GLOBAL + CATEGORY METAFIELDS
-    ===================================================== */
+     * CONTROLLED GLOBAL + CATEGORY METAFIELDS
+     * ===================================================== */
 
-/* ================= PRODUCT KEYS ================= */
-const globalProductKeys = new Set(
-  (GLOBAL_METAFIELDS_CONFIG || [])
-    .filter(mf => mf.owner !== "variant")
-    .map(mf => `${mf.namespace}.${mf.key}`)
-);
-
-const categoryProductKeys = new Set(
-  (categoryMetafields || [])
-    .filter(mf => mf.owner !== "variant")
-    .map(mf => `${mf.namespace || "custom"}.${mf.key}`)
-);
-
-const productAllowedKeys = new Set([
-  ...globalProductKeys,
-  ...categoryProductKeys,
-]);
-
-/* ================= VARIANT KEYS ================= */
-const globalVariantKeys = new Set(
-  (VARIANT_METAFIELDS_CONFIG || [])
-    .map(mf => `${mf.namespace}.${mf.key}`)
-);
-
-const variantAllowedKeys = new Set([
-  ...globalVariantKeys,
-]);
-// console.log("🔍 VARIANT ALLOWED KEYS:", [...variantAllowedKeys]);
-    const payloadMetaobjectFields = metafields.filter(
-      (mf) => mf.type === "metaobject_reference"
+    /* ================= PRODUCT KEYS ================= */
+    const globalProductKeys = new Set(
+      (GLOBAL_METAFIELDS_CONFIG || [])
+        .filter((mf) => mf.owner !== "variant")
+        .map((mf) => `${mf.namespace}.${mf.key}`)
     );
 
-    const payloadNormalFields = metafields.filter(
-      (mf) => mf.type !== "metaobject_reference"
+    const categoryProductKeys = new Set(
+      (categoryMetafields || [])
+        .filter((mf) => mf.owner !== "variant")
+        .map((mf) => `${mf.namespace || "custom"}.${mf.key}`)
     );
+
+    const productAllowedKeys = new Set([...globalProductKeys, ...categoryProductKeys]);
+
+    /* ================= VARIANT KEYS ================= */
+    const globalVariantKeys = new Set(
+      (VARIANT_METAFIELDS_CONFIG || []).map((mf) => `${mf.namespace}.${mf.key}`)
+    );
+    const variantAllowedKeys = new Set([...globalVariantKeys]);
+
+    const payloadMetaobjectFields = metafields.filter((mf) => mf.type === "metaobject_reference");
+    const payloadNormalFields = metafields.filter((mf) => mf.type !== "metaobject_reference");
 
     const filteredNormalFields = payloadNormalFields.filter(
-  (mf) =>
-    productAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`) &&
-    mf.value !== undefined &&
-    mf.value !== null &&
-    mf.value !== ""
-);
+      (mf) =>
+        productAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`) &&
+        mf.value !== undefined &&
+        mf.value !== null &&
+        mf.value !== ""
+    );
 
     let resolvedMetaobjectFields = [];
 
     for (const mf of payloadMetaobjectFields) {
-      if (!productAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
-  continue;
+      if (!productAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`)) continue;
 
       const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
         admin,
@@ -761,11 +616,7 @@ const variantAllowedKeys = new Set([
       });
     }
 
-    const finalMetafields = [
-      ...filteredNormalFields,
-      ...resolvedMetaobjectFields,
-    ];
-
+    const finalMetafields = [...filteredNormalFields, ...resolvedMetaobjectFields];
     const CHUNK_SIZE = 25;
 
     for (let i = 0; i < finalMetafields.length; i += CHUNK_SIZE) {
@@ -783,7 +634,6 @@ const variantAllowedKeys = new Set([
           variables: {
             metafields: chunk.map((mf) => ({
               ownerId: productId,
-              //  ownerId: variantId,
               namespace: mf.namespace || "custom",
               key: mf.key,
               type: mf.type,
@@ -793,107 +643,90 @@ const variantAllowedKeys = new Set([
         }
       );
 
-      const errors =
-        response?.data?.metafieldsSet?.userErrors;
-
+      const errors = response?.data?.metafieldsSet?.userErrors;
       if (errors?.length) {
         throw new Error(JSON.stringify(errors));
       }
     }
-/* ================= VARIANT METAFIELDS ================= */
 
-if (variantId && variant_metafields.length) {
+    /* ================= VARIANT METAFIELDS ================= */
+    if (variantId && variant_metafields.length) {
+      const variant_payloadMetaobjectFields = variant_metafields.filter(
+        (mf) => mf.type === "metaobject_reference"
+      );
+      const variant_payloadNormalFields = variant_metafields.filter(
+        (mf) => mf.type !== "metaobject_reference"
+      );
 
-  const variant_payloadMetaobjectFields = variant_metafields.filter(
-    (mf) => mf.type === "metaobject_reference"
-  );
+      const variant_filteredNormalFields = variant_payloadNormalFields.filter((mf) => {
+        const key = `${mf.namespace || "custom"}.${mf.key}`;
+        const isAllowed = variantAllowedKeys.has(key);
+        const isValid = isValidMetafieldValue(mf.value);
+        return isAllowed && isValid;
+      });
 
-  const variant_payloadNormalFields = variant_metafields.filter(
-    (mf) => mf.type !== "metaobject_reference"
-  );
+      let variantResolvedMetaobjectFields = [];
 
-const variant_filteredNormalFields = variant_payloadNormalFields.filter(
-  (mf) => {
-    const key = `${mf.namespace || "custom"}.${mf.key}`;
-    const isAllowed = variantAllowedKeys.has(key);
+      for (const mf of variant_payloadMetaobjectFields) {
+        if (!variantAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`)) continue;
 
-    const isValid = isValidMetafieldValue(mf.value);
+        const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
+          admin,
+          metaobjectType: mf.metaobject_type,
+          displayFieldKey: mf.display_field_key,
+          displayValues: [mf.value],
+        });
 
-    // console.log("🔍 CHECK VARIANT MF:", {
-    //   key,
-    //   value: mf.value,
-    //   isAllowed,
-    //   isValid,
-    // });
+        if (!resolvedIds.length) continue;
 
-    return isAllowed && isValid;
-  }
-);
-  let variantResolvedMetaobjectFields = [];
+        variantResolvedMetaobjectFields.push({
+          namespace: mf.namespace || "custom",
+          key: mf.key,
+          type: mf.type,
+          value: resolvedIds[0],
+        });
+      }
 
-  for (const mf of variant_payloadMetaobjectFields) {
-    if (!variantAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`))
-      continue;
-    const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
-      admin,
-      metaobjectType: mf.metaobject_type,
-      displayFieldKey: mf.display_field_key,
-      displayValues: [mf.value],
-    });
-// console.log("resolvedIds.length",resolvedIds.length)
-    if (!resolvedIds.length) continue;
+      const finalVariantMetafields = [
+        ...variant_filteredNormalFields,
+        ...variantResolvedMetaobjectFields,
+      ];
+      console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
 
-    variantResolvedMetaobjectFields.push({
-      namespace: mf.namespace || "custom",
-      key: mf.key,
-      type: mf.type,
-      value: resolvedIds[0],
-    });
-  }
-  // console.log("variantResolvedMetaobjectFields",variantResolvedMetaobjectFields)
+      for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
+        const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
 
-  const finalVariantMetafields = [
-    ...variant_filteredNormalFields,
-    ...variantResolvedMetaobjectFields,
-  ];
-console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
-  const CHUNK_SIZE = 25;
+        const response = await admin.request(
+          `
+          mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+            metafieldsSet(metafields: $metafields) {
+              userErrors { field message }
+            }
+          }
+          `,
+          {
+            variables: {
+              metafields: chunk.map((mf) => ({
+                ownerId: variantId,
+                namespace: mf.namespace || "custom",
+                key: mf.key,
+                type: mf.type,
+                value: transformMetafieldValue(mf),
+              })),
+            },
+          }
+        );
 
-  for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
-    const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
-// console.log(`🔍 SENDING VARIANT CHUNK:${i}`, chunk);
-    const response = await admin.request(
-      `
-      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          userErrors { field message }
+        const errors = response?.data?.metafieldsSet?.userErrors;
+        if (errors?.length) {
+          console.error("❌ VARIANT METAFIELD ERROR:", errors);
+          console.error("❌ FAILED CHUNK:", chunk);
+          throw new Error(JSON.stringify(errors));
         }
       }
-      `,
-      {
-        variables: {
-          metafields: chunk.map((mf) => ({
-            ownerId: variantId, // ✅ correct
-            namespace: mf.namespace || "custom",
-            key: mf.key,
-            type: mf.type,
-            value: transformMetafieldValue(mf),
-          })),
-        },
-      }
-    );
+    }
 
-    const errors = response?.data?.metafieldsSet?.userErrors;
-      // console.log("🔍 SHOPIFY VARIANT RESPONSE:", JSON.stringify(response, null, 2));
-
-   if (errors?.length) {
-  console.error("❌ VARIANT METAFIELD ERROR:", errors);
-  console.error("❌ FAILED CHUNK:", chunk);
-  throw new Error(JSON.stringify(errors));
-}
-  }
-}
-    /* ================= SUCCESS ================= */
+    /* ================= SUCCESS LOGGING ================= */
     await insertLog({
       shop,
       netsuite_user,
@@ -901,27 +734,24 @@ console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
       shopify_product_id: productId,
       product_name: title,
       action: actionType,
-      status:warningLogs.length ? "warning" : "success",
-      error_message:warningLogs.length ? warningLogs.join(" | ") : null,
+      status: warningLogs.length ? "warning" : "success",
+      error_message: warningLogs.length ? warningLogs.join(" | ") : null,
     });
 
     return json({ success: true, action: actionType });
-
   } catch (error) {
+    /* ================= FAILED LOGGING ================= */
     await insertLog({
       shop,
       netsuite_user,
-      product_sku: sku ?? "unknown",
-      shopify_product_id: productId ?? null,
-      product_name: title ?? null,
+      product_sku: sku || "unknown",
+      shopify_product_id: productId || null,
+      product_name: title || null,
       action: actionType,
       status: "failed",
       error_message: error.message,
     });
 
-    return json(
-      { error: "Failed", details: error.message },
-      { status: 500 }
-    );
+    return json({ error: "Failed", details: error.message }, { status: 500 });
   }
 };
