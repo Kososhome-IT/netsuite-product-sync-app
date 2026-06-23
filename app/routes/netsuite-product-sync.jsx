@@ -210,6 +210,7 @@ export const action = async ({ request }) => {
 
     const {
       descriptionHtml,
+      madeToOrder,
       vendor,
       price = "0.00",
       compare_at,
@@ -492,7 +493,7 @@ export const action = async ({ request }) => {
               {
                 id: variantId,
                 taxable: false,
-                inventoryPolicy: "CONTINUE",
+                inventoryPolicy: madeToOrder ? "CONTINUE" : "DENY",
                 ...(price && { price: String(price) }),
                 ...(compare_at && { compareAtPrice: String(compare_at) }),
                 ...(barcode && { barcode }),
