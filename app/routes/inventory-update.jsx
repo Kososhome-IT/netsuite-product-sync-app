@@ -1,5 +1,4 @@
 import { json } from "@remix-run/node";
-import { createInventoryLog } from "../services/inventory/inventory-log.service";
 import { buildInventoryMetafields,toNumber} from "../services/inventory/utils/inventory.utils";
 import { WAREHOUSE_LOCATION_MAP} from "../services/inventory/utils/warehouse.config";
 import { getVariantBySku,setInventoryQuantity,updateInventoryMetafields} from "../services/inventory/shopify-inventory.service";
