@@ -1,16 +1,10 @@
 import { json } from "@remix-run/node";
-import { sessionStorage } from "../shopify.server";
-import { ApiVersion } from "@shopify/shopify-app-remix/server";
-import { createAdminApiClient } from "@shopify/admin-api-client";
+import { createInventoryLog } from "../services/inventory/inventory-log.service";
+import { buildInventoryMetafields,toNumber} from "../services/inventory/utils/inventory.utils";
+import { WAREHOUSE_LOCATION_MAP} from "../services/inventory/utils/warehouse.config";
+import { getVariantBySku,setInventoryQuantity,updateInventoryMetafields} from "../services/inventory/shopify-inventory.service";
 import prisma from "../db.server";
-
-/* ----------------------------------------------------
-   Warehouse → Shopify Location Mapping
----------------------------------------------------- */
-const WAREHOUSE_LOCATION_MAP = {
-  "High Point, NC": `gid://shopify/Location/${process.env.NC_WAREHOUSE_LOCATION_ID}`,
-  "Los Angeles, CA": `gid://shopify/Location/${process.env.CA_WAREHOUSE_LOCATION_ID}`,
-};
+import { getAdminClient } from "../services/shopify-admin.service";
 
 /* ----------------------------------------------------
    ACTION
@@ -20,7 +14,6 @@ export async function action({ request }) {
     return json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const shop = process.env.SHOP;
 
   let body = {};
   let sku = "UNKNOWN";
@@ -28,13 +21,14 @@ export async function action({ request }) {
   let quantity = 0;
   let locationId = "UNKNOWN";
   let setResult = null;
+  let metafieldsResult = null;
 
   try {
     /* ---------------- Parse Body ---------------- */
     body = await request.json();
     sku = body.sku;
     warehouse = body.warehouse;
-    quantity = Number(body.quantity);
+    quantity = Number(body.quantity) + toNumber(body.intransit) + toNumber(body.onorder) ;
 
     if (!sku || !warehouse || body.quantity === undefined) {
       await prisma.inventoryLog.create({
@@ -56,36 +50,9 @@ export async function action({ request }) {
       );
     }
 
-    /* ---------------- Load Offline Session ---------------- */
-    const session = await sessionStorage.loadSession(`offline_${shop}`);
-
-    if (!session) {
-      await prisma.inventoryLog.create({
-        data: {
-          sku,
-          warehouse,
-          locationId,
-          quantity,
-          status: "FAILED",
-          source: "NetSuite",
-          errorMessage: "Offline session missing",
-          requestPayload: body,
-        },
-      });
-
-      return json(
-        { error: "Offline session missing. Reinstall app." },
-        { status: 401 }
-      );
-    }
-
+  
     /* ---------------- Admin Client ---------------- */
-    const admin = createAdminApiClient({
-      storeDomain: shop,
-      apiVersion: ApiVersion.April25,
-      accessToken: session.accessToken,
-    });
-
+    const admin = await getAdminClient();
     /* ---------------- Resolve Location ---------------- */
     locationId = WAREHOUSE_LOCATION_MAP[warehouse];
 
@@ -110,26 +77,7 @@ export async function action({ request }) {
     }
 
     /* ---------------- Resolve SKU ---------------- */
-    const variantResult = await admin.request(
-      `
-      query getVariantBySKU($query: String!) {
-        productVariants(first: 1, query: $query) {
-          edges {
-            node {
-              inventoryItem {
-                id
-                tracked
-              }
-            }
-          }
-        }
-      }
-      `,
-      { variables: { query: `sku:${sku}` } }
-    );
-
-    const variant =
-      variantResult?.data?.productVariants?.edges?.[0]?.node;
+    const variant = await  getVariantBySku(admin,sku)
 
     if (!variant) {
       await prisma.inventoryLog.create({
@@ -142,7 +90,7 @@ export async function action({ request }) {
           source: "NetSuite",
           errorMessage: "SKU not found",
           requestPayload: body,
-          responsePayload: variantResult?.data ?? null,
+          responsePayload: null,
         },
       });
 
@@ -173,37 +121,9 @@ export async function action({ request }) {
     }
 
     /* ---------------- Set Inventory ---------------- */
-    setResult = await admin.request(
-      `
-      mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-        inventorySetQuantities(input: $input) {
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-      `,
-      {
-        variables: {
-          input: {
-            reason: "correction",
-            name: "available",
-            ignoreCompareQuantity: true,
-            quantities: [
-              {
-                inventoryItemId: variant.inventoryItem.id,
-                locationId,
-                quantity,
-              },
-            ],
-          },
-        },
-      }
-    );
+    setResult = await setInventoryQuantity(admin,variant.inventoryItem.id,locationId,quantity)
 
-    const errors =
-      setResult?.data?.inventorySetQuantities?.userErrors || [];
+    const errors = setResult?.data?.inventorySetQuantities?.userErrors || [];
 
     if (errors.length > 0) {
       await prisma.inventoryLog.create({
@@ -223,6 +143,46 @@ export async function action({ request }) {
       return json({ success: false, errors }, { status: 400 });
     }
 
+    const inventoryMetafields = buildInventoryMetafields({
+      variantId: variant.id,
+      warehouse,
+      body,
+      quantity,
+    });
+
+    if (inventoryMetafields.length) {
+      console.log(
+  JSON.stringify(inventoryMetafields, null, 2)
+);
+      metafieldsResult = await updateInventoryMetafields(admin, inventoryMetafields)
+
+      const metafieldErrors = metafieldsResult?.data?.metafieldsSet?.userErrors || [];
+
+      if (metafieldErrors.length > 0) {
+        await prisma.inventoryLog.create({
+          data: {
+            sku,
+            warehouse,
+            locationId,
+            quantity,
+            status: "FAILED",
+            source: "NetSuite",
+            errorMessage: JSON.stringify(metafieldErrors),
+            requestPayload: body,
+            responsePayload: {
+              inventory: setResult?.data ?? null,
+              metafields: metafieldsResult?.data ?? null,
+            },
+          },
+        });
+
+        return json(
+          { success: false, errors: metafieldErrors },
+          { status: 400 }
+        );
+      }
+    }
+
     /* ---------------- SUCCESS ---------------- */
     await prisma.inventoryLog.create({
       data: {
@@ -233,7 +193,10 @@ export async function action({ request }) {
         status: "SUCCESS",
         source: "NetSuite",
         requestPayload: body,
-        responsePayload: setResult?.data ?? null,
+        responsePayload: {
+          inventory: setResult?.data ?? null,
+          metafields: metafieldsResult?.data ?? null,
+        },
       },
     });
 
