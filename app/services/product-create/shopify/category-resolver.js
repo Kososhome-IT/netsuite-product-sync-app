@@ -3,7 +3,7 @@ import {
   CATEGORY_CONFIG,
   GLOBAL_METAFIELDS_CONFIG,
   VARIANT_METAFIELDS_CONFIG,
-} from "../config/category-mapping";
+} from "../../../config/category-mapping";
 
 /* =====================================================
  * Resolve from NetSuite category name

@@ -1,199 +1,40 @@
 import { json } from "@remix-run/node";
-import { createAdminApiClient } from "@shopify/admin-api-client";
-import { ApiVersion } from "@shopify/shopify-app-remix/server";
-import { sessionStorage } from "../shopify.server";
+import { getAdminClient } from "../services/shopify-admin.service";
 import { insertLog } from "../utils/insert-dashboard-log";
-import { COUNTRY_MAP } from "../config/countries";
+import { createProduct,updateProduct,getProductCategory} from "../services/product-create/shopify/product-create.service";
+import { setInventoryTracking} from "../services/product-create/shopify/inventory.service";
+import { getLocations} from "../services/product-create/shopify/location.service";
+import {setMetafields} from "../services/product-create/shopify/metafield.service";
+import { getVariants,getvariantId ,updateVariant,productOptionUpdate} from "../services/product-create/shopify/variant.service";
+import { resolveMetaobjectIdsByDisplayValues} from "../services/product-create/shopify/metaobject.service";
+import { slugify ,isValidMetafieldValue,transformMetafieldValue} from "../services/product-create/shopify/utils/product-create.utils";
 import {
   resolveFromNetSuite,
   resolveFromShopifyCategoryId,
   mergeMetafields,
   GLOBAL_METAFIELDS_CONFIG,
   VARIANT_METAFIELDS_CONFIG,
-} from "../services/category-resolver";
+} from "../services/product-create/shopify/category-resolver";
 
-// ============ HELPER FUNCTIONS ============
 
-function slugify(str) {
-  return String(str || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-/* =====================================================
- * METAOBJECT LIST RESOLVER
- * ===================================================== */
-async function resolveMetaobjectIdsByDisplayValues({
-  admin,
-  metaobjectType,
-  displayFieldKey,
-  displayValues,
-}) {
-  let allNodes = [];
-  let hasNextPage = true;
-  let cursor = null;
-
-  while (hasNextPage) {
-    const res = await admin.request(
-      `
-      query ($type: String!, $cursor: String) {
-        metaobjects(type: $type, first: 250, after: $cursor) {
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-          nodes {
-            id
-            fields {
-              key
-              value
-            }
-          }
-        }
-      }
-      `,
-      {
-        variables: {
-          type: metaobjectType,
-          cursor,
-        },
-      }
-    );
-
-    const data = res?.data?.metaobjects;
-    const nodes = data?.nodes || [];
-
-    allNodes.push(...nodes);
-    hasNextPage = data?.pageInfo?.hasNextPage;
-    cursor = data?.pageInfo?.endCursor;
-
-    console.log(`📦 FETCHED METAOBJECTS: ${allNodes.length}`);
-  }
-
-  const nodes = allNodes;
-  const valueSet = new Set(displayValues);
-  const resolvedIds = [];
-
-  for (const node of nodes) {
-    const field = node.fields.find(
-      (f) => f.key === displayFieldKey && valueSet.has(f.value)
-    );
-    if (field) resolvedIds.push(node.id);
-  }
-
-  return resolvedIds;
-}
-
-function isValidMetafieldValue(value) {
-  if (value === undefined || value === null) return false;
-
-  // string
-  if (typeof value === "string") {
-    return value.trim() !== "";
-  }
-
-  // array
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-
-  // object
-  if (typeof value === "object") {
-    return Object.keys(value).length > 0;
-  }
-
-  return true;
-}
-
-function parseInchesAndPounds(rawValue) {
-  if (!rawValue) return null;
-
-  const str = String(rawValue).toLowerCase().trim();
-
-  // extract number
-  const numberMatch = str.match(/[\d.]+/);
-  const value = numberMatch
-    ? parseFloat(Number(numberMatch[0]).toFixed(2))
-    : null;
-
-  if (!value) return null;
-
-  // detect unit
-  let unit = null;
-  if (str.includes("in") || str.includes("inch")) {
-    unit = "in";
-  } else if (str.includes("lb") || str.includes("pound")) {
-    unit = "lb";
-  }
-
-  return { value, unit };
-}
-
-function transformMetafieldValue(mf) {
-  const raw = mf.value;
-  const parsed = parseInchesAndPounds(raw);
-
-  // DIMENSION
-  if (mf.type === "dimension") {
-    return JSON.stringify({
-      value: parsed?.value ?? Number(raw),
-      unit: "in",
-    });
-  }
-
-  // WEIGHT
-  if (mf.type === "weight") {
-    return JSON.stringify({
-      value: parsed?.value ?? Number(raw),
-      unit: "lb",
-    });
-  }
-
-  // default
-  if (typeof raw === "string") return raw;
-  return JSON.stringify(raw);
-}
-
-/* =====================================================
- * REMIX ACTION HANDLER
- * ===================================================== */
 export const action = async ({ request }) => {
-  const shop = process.env.SHOP;
 
   let productId;
   let variantId;
   let inventoryItemId;
   let actionType = "updated";
   let sku;
-  let title;
-  let netsuite_user = "system";
+  
   let warningLogs = [];
-
+  let createCategoryConfig = null;
+  let categoryMetafields = [];
+  let netsuite_user = "system",
   try {
-    /* ================= SESSION ================= */
-    const offlineSessionId = `offline_${shop}`;
-    const session = await sessionStorage.loadSession(offlineSessionId);
-
-    if (!session) {
-      return json({ error: "Offline session missing" }, { status: 401 });
-    }
-
-    const admin = createAdminApiClient({
-      storeDomain: shop,
-      apiVersion: "2026-04",
-      accessToken: session.accessToken,
-    });
+   
+    const admin = getAdminClient()
 
     /* ================= LOCATIONS ================= */
-    const locationRes = await admin.request(`
-      query {
-        locations(first: 10) {
-          edges { node { id name } }
-        }
-      }
-    `);
+    const locationRes = await getLocations(admin)
 
     const locationMap = {};
     for (const edge of locationRes.data.locations.edges) {
@@ -202,13 +43,11 @@ export const action = async ({ request }) => {
 
     /* ================= PAYLOAD ================= */
     const payload = await request.json();
-    console.log("🔍 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
-
-    const { netsuite_category } = payload;
-    ({ title, sku, netsuite_user = "system" } = payload);
-    const { color, size } = payload;
-
-    const {
+    console.log("PAYLOAD:", JSON.stringify(payload, null, 2));
+    
+    const {netsuite_user,
+       title, sku,color, size ,
+      netsuite_category,
       descriptionHtml,
       madeToOrder,
       vendor,
@@ -221,6 +60,7 @@ export const action = async ({ request }) => {
       metafields = [],
       variant_metafields = [],
     } = payload;
+  
 
     console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
 
@@ -229,37 +69,21 @@ export const action = async ({ request }) => {
     }
 
     /* ================= CATEGORY ================= */
-    let createCategoryConfig = null;
-    let categoryMetafields = [];
+    
 
     if (netsuite_category) {
       createCategoryConfig = resolveFromNetSuite(netsuite_category);
     }
 
     /* ================= SEARCH SKU ================= */
-    const searchRes = await admin.request(
-      `
-      query ($query: String!) {
-        productVariants(first: 1, query: $query) {
-          edges {
-            node {
-              id
-              product { id }
-              inventoryItem { id }
-            }
-          }
-        }
-      }
-      `,
-      { variables: { query: `sku:${sku}` } }
-    );
+    const searchRes = await getVariants(admin,sku)
 
     const existingVariant = searchRes.data?.productVariants?.edges?.[0]?.node;
 
     /* ================= CREATE PRODUCT IF NOT EXISTS ================= */
     if (!existingVariant) {
       actionType = "created";
-      const prohandle = [
+      payload.prohandle = [
         payload.handle || slugify(title),
         slugify(payload.style),
         slugify(color),
@@ -267,50 +91,8 @@ export const action = async ({ request }) => {
       ]
         .filter(Boolean)
         .join("-");
-
-      const productRes = await admin.request(
-        `
-        mutation productCreate($product: ProductCreateInput!) {
-          productCreate(product: $product) {
-            product {
-              id
-              options {
-                id
-                name
-                optionValues { name }
-              }
-            }
-            userErrors { field message }
-          }
-        }
-        `,
-        {
-          variables: {
-            product: {
-              title,
-              status: "DRAFT",
-              handle: prohandle,
-              vendor,
-              descriptionHtml,
-              ...(createCategoryConfig && {
-                category: createCategoryConfig.taxonomyId,
-              }),
-              // CREATE OPTIONS HERE
-              productOptions: [
-                ...(payload.color && payload.color.trim()
-                  ? [{ name: "Color", values: [{ name: payload.color.trim() }] }]
-                  : []),
-                ...(payload.size && payload.size.trim()
-                  ? [{ name: "Size", values: [{ name: payload.size.trim() }] }]
-                  : []),
-                ...(payload.style && payload.style.trim()
-                  ? [{ name: "Style", values: [{ name: payload.style.trim() }] }]
-                  : []),
-              ],
-            },
-          },
-        }
-      );
+  payload.createCategoryConfig = createCategoryConfig
+      const productRes = await createProduct(admin, payload)
 
       if (productRes.data.productCreate.userErrors.length) {
         throw new Error(JSON.stringify(productRes.data.productCreate.userErrors));
@@ -318,20 +100,7 @@ export const action = async ({ request }) => {
 
       productId = productRes.data.productCreate.product.id;
 
-      const productQueryRes = await admin.request(
-        `
-        query ($id: ID!) {
-          product(id: $id) {
-            variants(first: 1) {
-              edges {
-                node { id inventoryItem { id } }
-              }
-            }
-          }
-        }
-        `,
-        { variables: { id: productId } }
-      );
+      const productQueryRes = await getvariantId(admin,productId);
 
       const node = productQueryRes.data.product.variants.edges[0].node;
       variantId = node.id;
@@ -388,41 +157,12 @@ export const action = async ({ request }) => {
           }
 
           /* ================= CONVERT OPTION TO LINKED ================= */
-          const optionUpdateRes = await admin.request(
-            `
-            mutation productOptionUpdate(
-              $productId: ID!,
-              $option: OptionUpdateInput!,
-              $optionValuesToUpdate: [OptionValueUpdateInput!],
-            ) {
-              productOptionUpdate(
-                productId: $productId,
-                option: $option,
-                optionValuesToUpdate: $optionValuesToUpdate,
-              ) {
-                userErrors { field message }
-              }
-            }
-            `,
-            {
-              variables: {
-                productId,
-                option: {
-                  id: colorOption.id,
-                  linkedMetafield: {
-                    namespace: "shopify",
-                    key: "color-pattern",
-                  },
-                },
-                optionValuesToUpdate: [
-                  {
-                    id: colorOptionValue.id,
-                    linkedMetafieldValue: colorMetaobjectId,
-                  },
-                ],
-              },
-            }
-          );
+          const optionUpdateRes = await productOptionUpdate(admin, {
+  productId,
+  colorOption,
+  colorOptionValue,
+  colorMetaobjectId,
+});
 
           const optionErrors = optionUpdateRes?.data?.productOptionUpdate?.userErrors;
           console.log("🔗 OPTION UPDATE RESPONSE:", JSON.stringify(optionUpdateRes, null, 2));
@@ -430,44 +170,11 @@ export const action = async ({ request }) => {
           if (optionErrors?.length) {
             throw new Error(JSON.stringify(optionErrors));
           }
-
-          const verifyRes = await admin.request(
-            `
-            query ($id: ID!) {
-              product(id: $id) {
-                options {
-                  id
-                  name
-                  linkedMetafield { namespace key }
-                  optionValues { id name linkedMetafieldValue }
-                }
-              }
-            }
-            `,
-            { variables: { id: productId } }
-          );
-
-          console.log("✅ FINAL VERIFY:", JSON.stringify(verifyRes.data.product.options, null, 2));
         }
       }
 
       inventoryItemId = node.inventoryItem.id;
-      await admin.request(
-        `
-        mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-          inventoryItemUpdate(id: $id, input: $input) {
-            inventoryItem { id tracked }
-            userErrors { field message }
-          }
-        }
-        `,
-        {
-          variables: {
-            id: inventoryItemId,
-            input: { tracked: true },
-          },
-        }
-      );
+     await setInventoryTracking(admin,inventoryItemId)
 
       categoryMetafields = createCategoryConfig?.metafields || [];
     } else {
@@ -478,37 +185,17 @@ export const action = async ({ request }) => {
 
     /* ================= UPDATE SKU / BARCODE / HS CODE ================= */
     if (variantId && productId) {
-      const variantUpdateRes = await admin.request(
-        `
-        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-            userErrors { field message }
-          }
-        }
-        `,
-        {
-          variables: {
-            productId: productId,
-            variants: [
-              {
-                id: variantId,
-                taxable: false,
-                inventoryPolicy: madeToOrder ? "CONTINUE" : "DENY",
-                ...(price && { price: String(price) }),
-                ...(compare_at && { compareAtPrice: String(compare_at) }),
-                ...(barcode && { barcode }),
-                inventoryItem: {
-                  ...(sku && { sku }),
-                  ...(hs_code && { harmonizedSystemCode: hs_code }),
-                  ...(country_of_origin && {
-                    countryCodeOfOrigin: COUNTRY_MAP[country_of_origin] || country_of_origin,
-                  }),
-                },
-              },
-            ],
-          },
-        }
-      );
+     const variantUpdateRes = await updateVariant(admin, {
+  productId,
+  variantId,
+  madeToOrder,
+  price,
+  compare_at,
+  barcode,
+  sku,
+  hs_code,
+  country_of_origin,
+});
 
       const errors = variantUpdateRes?.data?.productVariantsBulkUpdate?.userErrors;
       if (errors?.length) {
@@ -517,41 +204,17 @@ export const action = async ({ request }) => {
     }
 
     /* ================= UPDATE PRODUCT DETAILS ================= */
-    await admin.request(
-      `
-      mutation productUpdate($input: ProductInput!) {
-        productUpdate(input: $input) {
-          userErrors { field message }
-        }
-      }
-      `,
-      {
-        variables: {
-          input: {
-            id: productId,
-            title,
-            descriptionHtml,
-            vendor,
-            ...(createCategoryConfig && {
-              category: createCategoryConfig.taxonomyId,
-            }),
-          },
-        },
-      }
-    );
+    await updateProduct(admin, {
+  productId,
+  title,
+  descriptionHtml,
+  vendor,
+  createCategoryConfig,
+});
 
     /* ================= CATEGORY RESOLVE UPDATE ================= */
     if (actionType === "updated") {
-      const categoryRes = await admin.request(
-        `
-        query ($id: ID!) {
-          product(id: $id) {
-            category { id }
-          }
-        }
-        `,
-        { variables: { id: productId } }
-      );
+     const categoryRes = await getProductCategory(admin, {productId,});
 
       const updateCategoryConfig = resolveFromShopifyCategoryId(
         categoryRes.data.product.category?.id
@@ -622,28 +285,7 @@ export const action = async ({ request }) => {
 
     for (let i = 0; i < finalMetafields.length; i += CHUNK_SIZE) {
       const chunk = finalMetafields.slice(i, i + CHUNK_SIZE);
-
-      const response = await admin.request(
-        `
-        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-          metafieldsSet(metafields: $metafields) {
-            userErrors { field message }
-          }
-        }
-        `,
-        {
-          variables: {
-            metafields: chunk.map((mf) => ({
-              ownerId: productId,
-              namespace: mf.namespace || "custom",
-              key: mf.key,
-              type: mf.type,
-              value: mf.value,
-            })),
-          },
-        }
-      );
-
+      const response = await setMetafields(admin, {productId,chunk,});
       const errors = response?.data?.metafieldsSet?.userErrors;
       if (errors?.length) {
         throw new Error(JSON.stringify(errors));
@@ -696,28 +338,7 @@ export const action = async ({ request }) => {
 
       for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
         const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
-
-        const response = await admin.request(
-          `
-          mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-            metafieldsSet(metafields: $metafields) {
-              userErrors { field message }
-            }
-          }
-          `,
-          {
-            variables: {
-              metafields: chunk.map((mf) => ({
-                ownerId: variantId,
-                namespace: mf.namespace || "custom",
-                key: mf.key,
-                type: mf.type,
-                value: transformMetafieldValue(mf),
-              })),
-            },
-          }
-        );
-
+        const response = await setMetafields(admin, {productId,chunk,});
         const errors = response?.data?.metafieldsSet?.userErrors;
         if (errors?.length) {
           console.error("❌ VARIANT METAFIELD ERROR:", errors);
@@ -729,7 +350,7 @@ export const action = async ({ request }) => {
 
     /* ================= SUCCESS LOGGING ================= */
     await insertLog({
-      shop,
+      
       netsuite_user,
       product_sku: sku,
       shopify_product_id: productId,
@@ -743,7 +364,7 @@ export const action = async ({ request }) => {
   } catch (error) {
     /* ================= FAILED LOGGING ================= */
     await insertLog({
-      shop,
+      
       netsuite_user,
       product_sku: sku || "unknown",
       shopify_product_id: productId || null,
