@@ -1,5 +1,3 @@
-import "@shopify/polaris/build/esm/styles.css";
-
 import {
   Links,
   Meta,
@@ -8,11 +6,6 @@ import {
   ScrollRestoration,
 } from "@remix-run/react";
 import customStylesHref from "./styles/custom.css";
-
-export const links = () => [
-  { rel: "stylesheet", href: customStylesHref },
-];
-
 export default function App() {
   return (
     <html>
