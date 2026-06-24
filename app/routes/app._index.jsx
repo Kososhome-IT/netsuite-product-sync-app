@@ -186,7 +186,7 @@ export default function Index() {
                       padding="400"
                       background="bg-surface-active"
                       borderWidth="025"
-                      borderRadius="200"
+                      
                       borderColor="border"
                       overflowX="scroll"
                     >
@@ -204,7 +204,6 @@ export default function Index() {
                       padding="400"
                       background="bg-surface-active"
                       borderWidth="025"
-                      borderRadius="200"
                       borderColor="border"
                       overflowX="scroll"
                     >
