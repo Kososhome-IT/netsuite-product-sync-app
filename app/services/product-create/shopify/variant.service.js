@@ -48,8 +48,21 @@ export async function updateVariant(admin, payload) {
 
   if (payload.country_of_origin) {
     variant.inventoryItem.countryCodeOfOrigin =
-      COUNTRY_MAP[payload.country_of_origin] ||
-      payload.country_of_origin;
+      COUNTRY_MAP[payload.country_of_origin] || payload.country_of_origin;
+  }
+
+  /* ================= WEIGHT ================= */
+  if (payload.weight !== undefined && payload.weight !== null && payload.weight !== "") {
+    const numericWeight = Number(payload.weight);
+
+    if (!Number.isNaN(numericWeight) && numericWeight > 0) {
+      variant.inventoryItem.measurement = {
+        weight: {
+          value: numericWeight,
+          unit: "POUNDS", // change if your Netsuite weight is in KG/GRAMS etc.
+        },
+      };
+    }
   }
 
   return await admin.request(
@@ -62,6 +75,19 @@ export async function updateVariant(admin, payload) {
           productId: $productId
           variants: $variants
         ) {
+          productVariants {
+            id
+            inventoryItem {
+              id
+              sku
+              measurement {
+                weight {
+                  value
+                  unit
+                }
+              }
+            }
+          }
           userErrors {
             field
             message

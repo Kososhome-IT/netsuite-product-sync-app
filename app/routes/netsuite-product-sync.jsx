@@ -382,24 +382,28 @@ console.log(
       let variantResolvedMetaobjectFields = [];
 
       for (const mf of variant_payloadMetaobjectFields) {
-        if (!variantAllowedKeys.has(`${mf.namespace || "custom"}.${mf.key}`)) continue;
+  const key = `${mf.namespace || "custom"}.${mf.key}`;
 
-        const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
-          admin,
-          metaobjectType: mf.metaobject_type,
-          displayFieldKey: mf.display_field_key,
-          displayValues: [mf.value],
-        });
+  if (!variantAllowedKeys.has(key)) continue;
+  if (!isValidMetafieldValue(mf.value)) continue;
+  if (!mf.metaobject_type || !mf.display_field_key) continue;
 
-        if (!resolvedIds.length) continue;
+  const resolvedIds = await resolveMetaobjectIdsByDisplayValues({
+    admin,
+    metaobjectType: mf.metaobject_type,
+    displayFieldKey: mf.display_field_key,
+    displayValues: [String(mf.value).trim()],
+  });
 
-        variantResolvedMetaobjectFields.push({
-          namespace: mf.namespace || "custom",
-          key: mf.key,
-          type: mf.type,
-          value: resolvedIds[0],
-        });
-      }
+  if (!resolvedIds.length) continue;
+
+  variantResolvedMetaobjectFields.push({
+    namespace: mf.namespace || "custom",
+    key: mf.key,
+    type: mf.type,
+    value: resolvedIds[0],
+  });
+}
 
       const finalVariantMetafields = [
         ...variant_filteredNormalFields,
