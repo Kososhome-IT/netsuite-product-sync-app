@@ -18,7 +18,7 @@ export async function getAdminClient() {
 
   return createAdminApiClient({
     storeDomain: shop,
-    apiVersion: ApiVersion.April25,
+    apiVersion: ApiVersion.April26,
     accessToken: session.accessToken,
   });
 }

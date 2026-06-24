@@ -1,4 +1,4 @@
-import { COUNTRY_MAP } from "../../../config/countries";
+
 
 export async function getProductCategory(admin, payload) {
   return await admin.request(
@@ -126,6 +126,30 @@ export async function createProduct(admin, payload) {
     {
       variables: {
         product,
+      },
+    }
+  );
+}
+
+export async function getProductOptions(admin, payload) {
+  return await admin.request(
+    `
+      query ($id: ID!) {
+        product(id: $id) {
+          options {
+            id
+            name
+            optionValues {
+              id
+              name
+            }
+          }
+        }
+      }
+    `,
+    {
+      variables: {
+        id: payload.productId,
       },
     }
   );

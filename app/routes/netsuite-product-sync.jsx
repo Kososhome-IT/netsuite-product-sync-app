@@ -1,11 +1,11 @@
 import { json } from "@remix-run/node";
 import { getAdminClient } from "../services/shopify-admin.service";
+import prisma from "../db.server";
 import { insertLog } from "../utils/insert-dashboard-log";
-import { createProduct,updateProduct,getProductCategory} from "../services/product-create/shopify/product-create.service";
+import { createProduct,updateProduct,getProductCategory,getProductOptions} from "../services/product-create/shopify/product-create.service";
 import { setInventoryTracking} from "../services/product-create/shopify/inventory.service";
-import { getLocations} from "../services/product-create/shopify/location.service";
 import {setMetafields} from "../services/product-create/shopify/metafield.service";
-import { getVariants,getvariantId ,updateVariant,productOptionUpdate} from "../services/product-create/shopify/variant.service";
+import { getVariants,getVariantById,getvariantId ,updateVariant,productOptionUpdate} from "../services/product-create/shopify/variant.service";
 import { resolveMetaobjectIdsByDisplayValues} from "../services/product-create/shopify/metaobject.service";
 import { slugify ,isValidMetafieldValue,transformMetafieldValue} from "../services/product-create/shopify/utils/product-create.utils";
 import {
@@ -18,80 +18,137 @@ import {
 
 
 export const action = async ({ request }) => {
+  console.log("ACTION HIT AT:", new Date().toISOString());
 
   let productId;
   let variantId;
   let inventoryItemId;
   let actionType = "updated";
   let sku;
-  
   let warningLogs = [];
   let createCategoryConfig = null;
   let categoryMetafields = [];
-  let netsuite_user = "system",
+  let netsuite_user = "system";
+  let syncLog = null; 
+  let title;
+  let color;
+  let size;
+  let netsuite_category;
+  let descriptionHtml;
+  let madeToOrder;
+  let vendor;
+  let price = "0.00";
+  let compare_at;
+  let barcode;
+  let hs_code;
+  let country_of_origin;
+  let weight;
+  let metafields = [];
+  let variant_metafields = [];
   try {
    
-    const admin = getAdminClient()
-
-    /* ================= LOCATIONS ================= */
-    const locationRes = await getLocations(admin)
-
-    const locationMap = {};
-    for (const edge of locationRes.data.locations.edges) {
-      locationMap[edge.node.name.toLowerCase()] = edge.node.id;
-    }
-
+    const admin = await getAdminClient()
     /* ================= PAYLOAD ================= */
     const payload = await request.json();
-    console.log("PAYLOAD:", JSON.stringify(payload, null, 2));
+
+
+
+({
+  netsuite_user = "system",
+  title,
+  sku,
+  color,
+  size,
+  netsuite_category,
+  descriptionHtml,
+  madeToOrder,
+  vendor,
+  price = "0.00",
+  compare_at,
+  barcode,
+  hs_code,
+  country_of_origin,
+  weight,
+  metafields = [],
+  variant_metafields = [],
+} = payload);
+
+/* ================= DUPLICATE REQUEST CHECK ================= */
+const existingProcessing = await prisma.productSyncLog.findFirst({
+  where: {
+    sku,
+    status: "PROCESSING",
+    createdAt: {
+      gte: new Date(Date.now() - 5 * 60 * 1000), // last 5 minutes
+    },
+  },
+  orderBy: {
+    createdAt: "desc",
+  },
+});
+
+if (existingProcessing) {
+  console.log(`⏭ Duplicate sync skipped for SKU ${sku}. Existing log id: ${existingProcessing.id}`);
+
+  await prisma.productSyncLog.create({
+    data: {
+      sku,
+      title,
+      action: null,
+      status: "SKIPPED",
+      payload,
+      error: {
+        reason: "Duplicate request skipped because another sync is already PROCESSING",
+        existingLogId: existingProcessing.id,
+      },
+    },
+  });
+
+  return json({
+    success: true,
+    skipped: true,
+    message: `Sync already in progress for SKU ${sku}`,
+  });
+}
+
+/* ================= CREATE PROCESSING LOG ================= */
+syncLog = await prisma.productSyncLog.create({
+  data: {
+    sku,
+    title,
+    action: null,
+    status: "PROCESSING",
+    payload,
+  },
+});
     
-    const {netsuite_user,
-       title, sku,color, size ,
-      netsuite_category,
-      descriptionHtml,
-      madeToOrder,
-      vendor,
-      price = "0.00",
-      compare_at,
-      barcode,
-      hs_code,
-      country_of_origin,
-      weight,
-      metafields = [],
-      variant_metafields = [],
-    } = payload;
-  
-
-    console.log("🔍 VARIANT METAFIELDS RECEIVED:", variant_metafields);
-
+    // validation if title and sku are there
     if (!title || !sku) {
       return json({ error: "title and sku are required" }, { status: 400 });
     }
-
     /* ================= CATEGORY ================= */
-    
-
+    // checking if netsuite category was provided
     if (netsuite_category) {
       createCategoryConfig = resolveFromNetSuite(netsuite_category);
+      // console.log("createCategoryConfig",createCategoryConfig)
     }
 
     /* ================= SEARCH SKU ================= */
+    // searching if variant exist with given sku
     const searchRes = await getVariants(admin,sku)
-
     const existingVariant = searchRes.data?.productVariants?.edges?.[0]?.node;
 
     /* ================= CREATE PRODUCT IF NOT EXISTS ================= */
+    // creating product if sku not exist
     if (!existingVariant) {
+      // create action runs
       actionType = "created";
-      payload.prohandle = [
-        payload.handle || slugify(title),
-        slugify(payload.style),
-        slugify(color),
-        slugify(size),
-      ]
-        .filter(Boolean)
-        .join("-");
-  payload.createCategoryConfig = createCategoryConfig
+
+      // genrating handle 
+      payload.prohandle = [ payload.handle || slugify(title), slugify(payload.style), slugify(color), slugify(size)].filter(Boolean).join("-");
+      payload.createCategoryConfig = createCategoryConfig
+
+      // craeting product with minimum values as shopify allow this only on product creation no sku update and variant 
       const productRes = await createProduct(admin, payload)
 
       if (productRes.data.productCreate.userErrors.length) {
@@ -100,14 +157,13 @@ export const action = async ({ request }) => {
 
       productId = productRes.data.productCreate.product.id;
 
+      // getting variant id from created product
       const productQueryRes = await getvariantId(admin,productId);
-
-      const node = productQueryRes.data.product.variants.edges[0].node;
-      variantId = node.id;
+      variantId = productQueryRes.data.product.variants.edges[0].node.id;
 
       /* ================= LINK COLOR METAOBJECT ================= */
       if (color && color.trim()) {
-        console.log("run 1");
+        // console.log("run 1");
         const colorMetaobjectIds = await resolveMetaobjectIdsByDisplayValues({
           admin,
           metaobjectType: "shopify--color-pattern",
@@ -116,7 +172,7 @@ export const action = async ({ request }) => {
         });
 
         const colorMetaobjectId = colorMetaobjectIds?.[0];
-        console.log(colorMetaobjectId);
+        // console.log(colorMetaobjectId);
 
         if (!colorMetaobjectId) {
           const warningMessage = `No color metaobject found for color: ${color}`;
@@ -124,25 +180,12 @@ export const action = async ({ request }) => {
           warningLogs.push(warningMessage);
         } else {
           /* ================= REFRESH PRODUCT OPTIONS ================= */
-          const optionQueryRes = await admin.request(
-            `
-            query ($id: ID!) {
-              product(id: $id) {
-                options {
-                  id
-                  name
-                  optionValues { id name }
-                }
-              }
-            }
-            `,
-            { variables: { id: productId } }
-          );
+         const optionQueryRes = await getProductOptions(admin, { productId });
 
           const colorOption = optionQueryRes.data.product.options.find(
             (o) => o.name === "Color"
           );
-          console.log("🎨 COLOR OPTION:", JSON.stringify(colorOption, null, 2));
+          // console.log("🎨 COLOR OPTION:", JSON.stringify(colorOption, null, 2));
 
           if (!colorOption) {
             throw new Error("Color option not found");
@@ -165,7 +208,7 @@ export const action = async ({ request }) => {
 });
 
           const optionErrors = optionUpdateRes?.data?.productOptionUpdate?.userErrors;
-          console.log("🔗 OPTION UPDATE RESPONSE:", JSON.stringify(optionUpdateRes, null, 2));
+          // console.log("🔗 OPTION UPDATE RESPONSE:", JSON.stringify(optionUpdateRes, null, 2));
 
           if (optionErrors?.length) {
             throw new Error(JSON.stringify(optionErrors));
@@ -173,7 +216,7 @@ export const action = async ({ request }) => {
         }
       }
 
-      inventoryItemId = node.inventoryItem.id;
+      inventoryItemId = productQueryRes.data.product.variants.edges[0].node.inventoryItem.id;
      await setInventoryTracking(admin,inventoryItemId)
 
       categoryMetafields = createCategoryConfig?.metafields || [];
@@ -185,6 +228,13 @@ export const action = async ({ request }) => {
 
     /* ================= UPDATE SKU / BARCODE / HS CODE ================= */
     if (variantId && productId) {
+console.log("UPDATE VARIANT INPUT", {
+  productId,
+  variantId,
+  sku,
+  actionType,
+});
+
      const variantUpdateRes = await updateVariant(admin, {
   productId,
   variantId,
@@ -196,7 +246,28 @@ export const action = async ({ request }) => {
   hs_code,
   country_of_origin,
 });
+// sku creation varification
+const verifyVariantRes = await getVariantById(admin, variantId);
 
+console.log(
+  "VERIFY VARIANT AFTER UPDATE:",
+  JSON.stringify(verifyVariantRes, null, 2)
+);
+
+const savedSku =
+  verifyVariantRes?.data?.productVariant?.inventoryItem?.sku ??
+  verifyVariantRes?.data?.productVariant?.sku;
+
+if (savedSku !== sku) {
+  throw new Error(
+    `SKU update failed. Expected ${sku}, got ${savedSku || "blank"}`
+  );
+}
+// end
+console.log(
+  "VARIANT UPDATE RESPONSE FROM ROUTE:",
+  JSON.stringify(variantUpdateRes, null, 2)
+);
       const errors = variantUpdateRes?.data?.productVariantsBulkUpdate?.userErrors;
       if (errors?.length) {
         throw new Error(JSON.stringify(errors));
@@ -334,21 +405,34 @@ export const action = async ({ request }) => {
         ...variant_filteredNormalFields,
         ...variantResolvedMetaobjectFields,
       ];
-      console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
+      // console.log("🔍 FINAL VARIANT METAFIELDS:", finalVariantMetafields);
 
       for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
         const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
         const response = await setMetafields(admin, {productId,chunk,});
         const errors = response?.data?.metafieldsSet?.userErrors;
         if (errors?.length) {
-          console.error("❌ VARIANT METAFIELD ERROR:", errors);
-          console.error("❌ FAILED CHUNK:", chunk);
+          // console.error("❌ VARIANT METAFIELD ERROR:", errors);
+          // console.error("❌ FAILED CHUNK:", chunk);
           throw new Error(JSON.stringify(errors));
         }
       }
     }
 
     /* ================= SUCCESS LOGGING ================= */
+    /* ================= UPDATE PRODUCT SYNC LOG SUCCESS ================= */
+if (syncLog?.id) {
+  await prisma.productSyncLog.update({
+    where: { id: syncLog.id },
+    data: {
+      action: actionType,
+      status: "SUCCESS",
+      productId,
+      variantId,
+      inventoryItemId,
+    },
+  });
+}
     await insertLog({
       
       netsuite_user,
@@ -362,18 +446,35 @@ export const action = async ({ request }) => {
 
     return json({ success: true, action: actionType });
   } catch (error) {
-    /* ================= FAILED LOGGING ================= */
-    await insertLog({
-      
-      netsuite_user,
-      product_sku: sku || "unknown",
-      shopify_product_id: productId || null,
-      product_name: title || null,
-      action: actionType,
-      status: "failed",
-      error_message: error.message,
+  /* ================= UPDATE PRODUCT SYNC LOG FAILED ================= */
+  if (syncLog?.id) {
+    await prisma.productSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        action: actionType || null,
+        status: "FAILED",
+        productId: productId || null,
+        variantId: variantId || null,
+        inventoryItemId: inventoryItemId || null,
+        error: {
+          message: error.message,
+          stack: error.stack,
+        },
+      },
     });
-
-    return json({ error: "Failed", details: error.message }, { status: 500 });
   }
+
+  /* ================= FAILED DASHBOARD LOG ================= */
+  await insertLog({
+    netsuite_user,
+    product_sku: sku || "unknown",
+    shopify_product_id: productId || null,
+    product_name: title || null,
+    action: actionType,
+    status: "failed",
+    error_message: error.message,
+  });
+
+  return json({ error: "Failed", details: error.message }, { status: 500 });
+}
 };

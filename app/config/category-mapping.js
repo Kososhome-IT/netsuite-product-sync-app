@@ -160,7 +160,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
   {
     namespace: "custom",
     key: "item_weight",
-    type: "weight",
+    type: "number_decimal",
     owner: "variant",
   },
 
@@ -194,7 +194,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
   {
     namespace: "custom",
     key: "packaged_weight",
-    type: "weight",
+    type: "number_decimal",
     owner: "variant",
   },
   {
@@ -214,7 +214,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
     {
       namespace: "custom",
       key: `box_1_weight`,
-      type: "weight",
+      type: "number_decimal",
       owner: "variant",
     },
     {
@@ -232,7 +232,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
     {
       namespace: "custom",
       key: `box_2_weight`,
-      type: "weight",
+      type: "number_decimal",
       owner: "variant",
     },
     {
@@ -250,7 +250,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
     {
       namespace: "custom",
       key: `box_3_weight`,
-      type: "weight",
+      type: "number_decimal",
       owner: "variant",
     },
     {
@@ -268,7 +268,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
     {
       namespace: "custom",
       key: `box_4_weight`,
-      type: "weight",
+      type: "number_decimal",
       owner: "variant",
     },
     {
@@ -286,7 +286,7 @@ export const VARIANT_METAFIELDS_CONFIG = [
     {
       namespace: "custom",
       key: `box_5_weight`,
-      type: "weight",
+      type: "number_decimal",
       owner: "variant",
     },
     {

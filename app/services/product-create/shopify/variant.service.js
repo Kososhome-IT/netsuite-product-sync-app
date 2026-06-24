@@ -1,3 +1,4 @@
+import { COUNTRY_MAP } from "../../../config/countries";
 export async function getVariants(admin,sku){
    return await admin.request(
          `
@@ -133,6 +134,26 @@ export async function productOptionUpdate(admin, payload) {
           },
         ],
       },
+    }
+  );
+}
+
+export async function getVariantById(admin, variantId) {
+  return await admin.request(
+    `
+      query ($id: ID!) {
+        productVariant(id: $id) {
+          id
+          sku
+          inventoryItem {
+            id
+            sku
+          }
+        }
+      }
+    `,
+    {
+      variables: { id: variantId },
     }
   );
 }
