@@ -246,6 +246,11 @@ console.log("UPDATE VARIANT INPUT", {
   hs_code,
   country_of_origin,
 });
+
+console.log(
+  "variantUpdateRes:",
+  JSON.stringify(variantUpdateRes, null, 2)
+);
 // sku creation varification
 const verifyVariantRes = await getVariantById(admin, variantId);
 
