@@ -53,7 +53,8 @@ model DashboardLog {
 model ProductSyncLog {
   id               Int      @id @default(autoincrement())
   sku              String
-  action           String   // created | updated | failed
+  action           String?  // created | updated
+  status           String   // PROCESSING | SUCCESS | FAILED | SKIPPED
   productId        String?
   variantId        String?
   inventoryItemId  String?
@@ -61,6 +62,10 @@ model ProductSyncLog {
   payload          Json?
   error            Json?
   createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([sku, status])
+  @@index([createdAt])
 }
 
 enum InventoryLogStatus {
