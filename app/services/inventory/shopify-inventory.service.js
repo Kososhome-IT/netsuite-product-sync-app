@@ -1,11 +1,19 @@
 export async function getVariantBySku(admin, sku) {
-    const result = await admin.request(
-        `
+  const query = `sku:${sku} AND product_status:ACTIVE,DRAFT`;
+
+  const result = await admin.request(
+    `
       query getVariantBySKU($query: String!) {
-        productVariants(first: 1, query: $query) {
+        productVariants(first: 10, query: $query) {
           edges {
             node {
               id
+              sku
+              product {
+                id
+                title
+                status
+              }
               inventoryItem {
                 id
                 tracked
@@ -14,10 +22,23 @@ export async function getVariantBySku(admin, sku) {
           }
         }
       }
-      `,
-        { variables: { query: `sku:${sku}` } }
-    );
-    return result?.data?.productVariants?.edges?.[0]?.node;
+    `,
+    { variables: { query } }
+  );
+
+  const edges = result?.data?.productVariants?.edges || [];
+
+  if (!edges.length) {
+    return null;
+  }
+
+  const normalizedSku = String(sku).trim().toLowerCase();
+
+  const exactMatch = edges.find(
+    (edge) => String(edge?.node?.sku || "").trim().toLowerCase() === normalizedSku
+  );
+
+  return exactMatch?.node || edges[0]?.node || null;
 }
 
 export async function setInventoryQuantity(admin, inventoryItemId, locationId, quantity
