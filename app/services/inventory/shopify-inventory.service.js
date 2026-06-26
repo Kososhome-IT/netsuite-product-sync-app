@@ -1,6 +1,6 @@
 export async function getVariantBySku(admin, sku) {
-  const query = `sku:${sku} AND product_status:ACTIVE,DRAFT`;
-
+  const query = `sku:${sku}`;
+console.log("variant sku",sku);
   const result = await admin.request(
     `
       query getVariantBySKU($query: String!) {
@@ -27,7 +27,8 @@ export async function getVariantBySku(admin, sku) {
   );
 
   const edges = result?.data?.productVariants?.edges || [];
-
+console.log("variant result",JSON.stringify(result ,null, 2));
+// console.log("variant edges",JSON.stringify(edges ,null, 2));
   if (!edges.length) {
     return null;
   }
