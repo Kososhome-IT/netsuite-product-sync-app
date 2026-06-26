@@ -1,4 +1,5 @@
 import { COUNTRY_MAP } from "../../../config/countries";
+import { cleanWeight } from "./utils/product-create.utils";
 export async function getVariants(admin,sku){
    return await admin.request(
          `
@@ -53,7 +54,7 @@ export async function updateVariant(admin, payload) {
 
   /* ================= WEIGHT ================= */
   if (payload.weight !== undefined && payload.weight !== null && payload.weight !== "") {
-    const numericWeight = Number(payload.weight);
+    const numericWeight = cleanWeight(payload.weight);
 
     if (!Number.isNaN(numericWeight) && numericWeight > 0) {
       variant.inventoryItem.measurement = {
