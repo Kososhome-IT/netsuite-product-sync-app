@@ -42,6 +42,7 @@ console.log("variant result",JSON.stringify(result ,null, 2));
   return exactMatch?.node || edges[0]?.node || null;
 }
 
+import crypto from "crypto:node";
 export async function setInventoryQuantity(admin, inventoryItemId, locationId, quantity) {
     
     const eventId = crypto.randomUUID();
