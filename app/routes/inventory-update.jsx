@@ -9,6 +9,8 @@ import { getAdminClient } from "../services/shopify-admin.service";
    ACTION
 ---------------------------------------------------- */
 export async function action({ request }) {
+
+  console.log("inventory update recived")
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, { status: 405 });
   }
@@ -25,6 +27,7 @@ export async function action({ request }) {
   try {
     /* ---------------- Parse Body ---------------- */
     body = await request.json();
+    console.log("inventory Data recived", JSON.stringify(body,null,2))
     sku = body.sku;
     warehouse = body.warehouse;
     quantity = Number(body.quantity) + toNumber(body.intransit) + toNumber(body.onorder) ;
@@ -54,6 +57,7 @@ export async function action({ request }) {
     const admin = await getAdminClient();
     /* ---------------- Resolve Location ---------------- */
     locationId = WAREHOUSE_LOCATION_MAP[warehouse];
+    console.log("locationId",locationId)
 
     if (!locationId || locationId.includes("undefined")) {
       await prisma.inventoryLog.create({
@@ -77,7 +81,7 @@ export async function action({ request }) {
 
     /* ---------------- Resolve SKU ---------------- */
     const variant = await  getVariantBySku(admin,sku)
-
+console.log("[inventory varient]",JSON.stringify(variant,null,2))
     if (!variant) {
       await prisma.inventoryLog.create({
         data: {
@@ -121,7 +125,7 @@ export async function action({ request }) {
 
     /* ---------------- Set Inventory ---------------- */
     setResult = await setInventoryQuantity(admin,variant.inventoryItem.id,locationId,quantity)
-
+console.log("[inventory set result]",JSON.stringify(setResult,null,2))
     const errors = setResult?.data?.inventorySetQuantities?.userErrors || [];
 
     if (errors.length > 0) {
@@ -148,11 +152,15 @@ export async function action({ request }) {
       body,
       quantity,
     });
+ console.log(
+  "[inventoryMetafields]",JSON.stringify(inventoryMetafields, null, 2)
+);
 
     if (inventoryMetafields.length) {
       console.log(
   JSON.stringify(inventoryMetafields, null, 2)
 );
+
       metafieldsResult = await updateInventoryMetafields(admin, inventoryMetafields)
 
       const metafieldErrors = metafieldsResult?.data?.metafieldsSet?.userErrors || [];
