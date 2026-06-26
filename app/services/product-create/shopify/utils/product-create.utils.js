@@ -75,3 +75,10 @@ export function transformMetafieldValue(mf) {
   if (typeof raw === "string") return raw;
   return JSON.stringify(raw);
 }
+
+export function cleanWeight(weightString) {
+    if (!weightString) return 0;
+    if (typeof weightString === 'number') return weightString;
+    const numericValue = weightString.replace(/[^0-9.]/g, '');
+    return parseFloat(numericValue) || 0;
+}
