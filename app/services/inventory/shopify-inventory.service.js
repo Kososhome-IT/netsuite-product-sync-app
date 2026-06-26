@@ -42,38 +42,43 @@ console.log("variant result",JSON.stringify(result ,null, 2));
   return exactMatch?.node || edges[0]?.node || null;
 }
 
-export async function setInventoryQuantity(admin, inventoryItemId, locationId, quantity
-) {
+export async function setInventoryQuantity(admin, inventoryItemId, locationId, quantity) {
+    
+    const eventId = crypto.randomUUID();
+
     return await admin.request(
         `
-      mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-        inventorySetQuantities(input: $input) {
-          userErrors {
-            field
-            message
+        mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $eventId: String!) {
+          inventorySetQuantities(input: $input) @idempotent(key: $eventId) {
+            inventoryAdjustmentGroup {
+              id
+            }
+            userErrors {
+              field
+              message
+            }
           }
         }
-      }
-      `,
+        `,
         {
             variables: {
                 input: {
                     reason: "correction",
                     name: "available",
-                    ignoreCompareQuantity: true,
                     quantities: [
                         {
                             inventoryItemId,
                             locationId,
-                            quantity,
+                            quantity: Number(quantity),
+                            changeFromQuantity: null
                         },
                     ],
                 },
+                eventId: eventId 
             },
         }
     );
 }
-
 export async function updateInventoryMetafields(
     admin,
     inventoryMetafields
