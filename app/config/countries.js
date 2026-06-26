@@ -57,5 +57,6 @@ export const COUNTRY_MAP = {
   "United Arab Emirates": "AE",
   "United Kingdom": "GB",
   "United States": "US",
-  "Vietnam": "VN"
+  "Vietnam": "VN",
+  "Viet Nam": "VN"
 };

@@ -1,5 +1,5 @@
 export async function setMetafields(admin, payload) {
-  const ownerId = payload.ownerId || payload.productId;
+  const ownerId = payload.ownerId || payload.productId || payload.variantId;
 
   const metafields = payload.chunk.map((mf) => ({
     ownerId,

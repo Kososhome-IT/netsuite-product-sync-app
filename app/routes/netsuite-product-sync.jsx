@@ -243,6 +243,7 @@ console.log("UPDATE VARIANT INPUT", {
   compare_at,
   barcode,
   sku,
+  weight,
   hs_code,
   country_of_origin,
 });
@@ -369,6 +370,11 @@ console.log(
     }
 
     /* ================= VARIANT METAFIELDS ================= */
+    console.log("VARIANT METAFIELDS COUNT", variant_metafields.length);
+console.log(
+  "RAW VARIANT METAFIELDS",
+  JSON.stringify(variant_metafields, null, 2)
+);
     if (variantId && variant_metafields.length) {
       const variant_payloadMetaobjectFields = variant_metafields.filter(
         (mf) => mf.type === "metaobject_reference"
@@ -418,7 +424,7 @@ console.log(
 
       for (let i = 0; i < finalVariantMetafields.length; i += CHUNK_SIZE) {
         const chunk = finalVariantMetafields.slice(i, i + CHUNK_SIZE);
-        const response = await setMetafields(admin, {productId,chunk,});
+        const response = await setMetafields(admin, {variantId,chunk,});
         const errors = response?.data?.metafieldsSet?.userErrors;
         if (errors?.length) {
           // console.error("❌ VARIANT METAFIELD ERROR:", errors);
