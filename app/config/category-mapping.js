@@ -142,19 +142,19 @@ export const VARIANT_METAFIELDS_CONFIG = [
   {
     namespace: "custom",
     key: "width",
-    type: "number_decimal",
+    type: "single_line_text_field",
     owner: "variant",
   },
   {
     namespace: "custom",
     key: "depth",
-    type: "number_decimal",
+    type: "single_line_text_field",
     owner: "variant",
   },
   {
     namespace: "custom",
     key: "height",
-    type: "number_decimal",
+    type: "single_line_text_field",
     owner: "variant",
   },
   {
