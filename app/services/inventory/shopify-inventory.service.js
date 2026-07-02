@@ -111,32 +111,31 @@ export async function activateInventoryLocation(
 ) {
   return await admin.request(
     `
-    mutation inventoryActivate(
-      $inventoryItemId: ID!,
-      $locationId: ID!
-    ) {
-      inventoryActivate(
-        inventoryItemId: $inventoryItemId,
-        locationId: $locationId
-      ) {
-        inventoryLevel {
-          id
-          location {
-            id
-            name
-          }
-        }
-        userErrors {
-          field
-          message
-        }
-      }
+   mutation inventoryActivate(
+  $inventoryItemId: ID!
+  $locationId: ID!
+  $eventId: String!
+) {
+  inventoryActivate(
+    inventoryItemId: $inventoryItemId
+    locationId: $locationId
+  ) @idempotent(key: $eventId) {
+    inventoryLevel {
+      id
     }
+
+    userErrors {
+      field
+      message
+    }
+  }
+}
     `,
     {
       variables: {
         inventoryItemId,
         locationId,
+        eventId: crypto.randomUUID()
       },
     }
   );
@@ -213,6 +212,12 @@ export async function ensureInventoryLocationActive(
       JSON.stringify(errors)
     );
   }
+  
+console.log("Location:", locationId);
+
+console.log(
+   "araw response activationResult", JSON.stringify(activationResult, null, 2)
+);
 
   console.log(
     "[Inventory] Location activated successfully."
