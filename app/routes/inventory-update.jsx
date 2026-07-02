@@ -1,9 +1,10 @@
 import { json } from "@remix-run/node";
 import { buildInventoryMetafields,toNumber} from "../services/inventory/utils/inventory.utils";
 import { WAREHOUSE_LOCATION_MAP} from "../services/inventory/utils/warehouse.config";
-import { getVariantBySku,setInventoryQuantity,updateInventoryMetafields} from "../services/inventory/shopify-inventory.service";
+import { getVariantBySku,setInventoryQuantity,updateInventoryMetafields,ensureInventoryLocationActive} from "../services/inventory/shopify-inventory.service";
 import prisma from "../db.server";
 import { getAdminClient } from "../services/shopify-admin.service";
+
 
 /* ----------------------------------------------------
    ACTION
@@ -122,6 +123,14 @@ console.log("[inventory varient]",JSON.stringify(variant,null,2))
         { status: 400 }
       );
     }
+
+    /* ---------------- Ensure Location Active ---------------- */
+
+await ensureInventoryLocationActive(
+  admin,
+  variant.inventoryItem.id,
+  locationId
+);
 
     /* ---------------- Set Inventory ---------------- */
     setResult = await setInventoryQuantity(admin,variant.inventoryItem.id,locationId,quantity)
