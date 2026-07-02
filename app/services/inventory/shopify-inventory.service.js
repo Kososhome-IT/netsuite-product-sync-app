@@ -103,3 +103,118 @@ export async function updateInventoryMetafields(
         }
     );
 }
+
+export async function activateInventoryLocation(
+  admin,
+  inventoryItemId,
+  locationId
+) {
+  return await admin.request(
+    `
+    mutation inventoryActivate(
+      $inventoryItemId: ID!,
+      $locationId: ID!
+    ) {
+      inventoryActivate(
+        inventoryItemId: $inventoryItemId,
+        locationId: $locationId
+      ) {
+        inventoryLevel {
+          id
+          location {
+            id
+            name
+          }
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    `,
+    {
+      variables: {
+        inventoryItemId,
+        locationId,
+      },
+    }
+  );
+}
+
+export async function getInventoryLevels(admin, inventoryItemId) {
+  return await admin.request(
+    `
+    query ($id: ID!) {
+      inventoryItem(id: $id) {
+        inventoryLevels(first: 20) {
+          nodes {
+            id
+            location {
+              id
+              name
+            }
+          }
+        }
+      }
+    }
+    `,
+    {
+      variables: {
+        id: inventoryItemId,
+      },
+    }
+  );
+}
+
+export async function ensureInventoryLocationActive(
+  admin,
+  inventoryItemId,
+  locationId
+) {
+  const levelResult = await getInventoryLevels(
+    admin,
+    inventoryItemId
+  );
+
+  const levels =
+    levelResult?.data?.inventoryItem?.inventoryLevels?.nodes || [];
+
+  const alreadyActive = levels.some(
+    (level) => level.location.id === locationId
+  );
+
+  if (alreadyActive) {
+    console.log(
+      "[Inventory] Location already active:",
+      locationId
+    );
+
+    return;
+  }
+
+  console.log(
+    "[Inventory] Activating location:",
+    locationId
+  );
+
+  const activationResult =
+    await activateInventoryLocation(
+      admin,
+      inventoryItemId,
+      locationId
+    );
+
+  const errors =
+    activationResult?.data?.inventoryActivate?.userErrors || [];
+
+  if (errors.length) {
+    throw new Error(
+      JSON.stringify(errors)
+    );
+  }
+
+  console.log(
+    "[Inventory] Location activated successfully."
+  );
+}
